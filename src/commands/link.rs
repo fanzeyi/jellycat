@@ -1,6 +1,6 @@
 use crate::repo;
 use clap::Args;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 
 #[derive(Args, Debug)]
 pub struct LinkArgs {
@@ -25,56 +25,32 @@ pub fn run(args: &LinkArgs) {
         }
     };
 
-    // 1. Verify the revset resolves to a single commit.
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg("commit_id")
-        .arg("-R")
-        .arg(&repo_root)
-        .output()
-        .expect("Failed to execute jj log");
+    // 1. Get the commit.
+    let commit = match repo::get_single_commit(&repo_root, &args.revset) {
+        Ok(commit) => commit,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            exit(1);
+        }
+    };
 
-    let commit_ids = String::from_utf8_lossy(&output.stdout);
-    let commits: Vec<&str> = commit_ids.lines().collect();
-    if commits.len() != 1 {
-        eprintln!(
-            "Error: revset must resolve to exactly one commit, but got {}",
-            commits.len()
-        );
-        exit(1);
-    }
-    let commit_id = commits[0];
-
-    // 2. Read existing description.
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg("description")
-        .arg("-R")
-        .arg(&repo_root)
-        .output()
-        .expect("Failed to execute jj log");
-    
-    let description = String::from_utf8_lossy(&output.stdout);
+    // 2. Check for existing PRs and filter them out if --force is used.
     let mut new_description_lines = Vec::new();
-
-    // 3. Check for existing PRs and filter them out if --force is used.
-    for line in description.lines() {
+    for line in commit.description.lines() {
         if let Some(pr_num_str) = line.trim().strip_prefix("PR: #") {
             if !args.force {
                 if let Ok(pr_num) = pr_num_str.parse::<u32>() {
                     if pr_num == args.pr_number {
-                        println!("PR #{} is already linked to this commit.", args.pr_number);
+                        println!(
+                            "PR #{} is already linked to changeset {}.",
+                            args.pr_number, commit.change_id
+                        );
                         return;
                     } else {
-                        eprintln!("Commit is already linked to PR #{}. Use --force to overwrite.", pr_num);
+                        eprintln!(
+                            "Commit is already linked to PR #{}. Use --force to overwrite.",
+                            pr_num
+                        );
                         exit(1);
                     }
                 }
@@ -84,14 +60,14 @@ pub fn run(args: &LinkArgs) {
         }
     }
 
-    // 4. Construct the new description.
+    // 3. Construct the new description.
     let mut new_description = new_description_lines.join("\n").trim_end().to_string();
     if !new_description.is_empty() {
         new_description.push_str("\n\n");
     }
     new_description.push_str(&format!("PR: #{}", args.pr_number));
 
-    // 5. Update commit description.
+    // 4. Update commit description.
     let status = Command::new("jj")
         .arg("describe")
         .arg("-r")
@@ -102,11 +78,14 @@ pub fn run(args: &LinkArgs) {
         .arg(&repo_root)
         .status()
         .expect("Failed to execute jj describe");
-    
+
     if !status.success() {
         eprintln!("jj describe failed");
         exit(1);
     }
 
-    println!("Linked PR #{} to commit {}", args.pr_number, commit_id);
+    println!(
+        "Linked PR #{} to change {}",
+        args.pr_number, commit.change_id
+    );
 }

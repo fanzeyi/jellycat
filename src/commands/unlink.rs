@@ -1,6 +1,6 @@
 use crate::repo;
 use clap::Args;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 
 #[derive(Args, Debug)]
 pub struct UnlinkArgs {
@@ -21,49 +21,19 @@ pub fn run(args: &UnlinkArgs) {
         }
     };
 
-    // 1. Verify the revset resolves to a single commit.
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg("commit_id")
-        .arg("-R")
-        .arg(&repo_root)
-        .output()
-        .expect("Failed to execute jj log");
+    // 1. Get the commit.
+    let commit = match repo::get_single_commit(&repo_root, &args.revset) {
+        Ok(commit) => commit,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            exit(1);
+        }
+    };
 
-    let commit_ids = String::from_utf8_lossy(&output.stdout);
-    let commits: Vec<&str> = commit_ids.lines().collect();
-    if commits.len() != 1 {
-        eprintln!(
-            "Error: revset must resolve to exactly one commit, but got {}",
-            commits.len()
-        );
-        exit(1);
-    }
-    let commit_id = commits[0];
-
-    // 2. Read existing description.
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg("description")
-        .arg("-R")
-        .arg(&repo_root)
-        .output()
-        .expect("Failed to execute jj log");
-
-    let description = String::from_utf8_lossy(&output.stdout);
+    // 2. Filter out PR lines.
     let mut new_description_lines = Vec::new();
     let mut pr_unlinked = false;
-
-    // 3. Filter out PR lines.
-    for line in description.lines() {
+    for line in commit.description.lines() {
         let trimmed_line = line.trim();
         let mut keep_line = true;
         if trimmed_line.starts_with("PR: #") {
@@ -89,17 +59,19 @@ pub fn run(args: &UnlinkArgs) {
 
     if !pr_unlinked {
         if let Some(pr_number) = args.pr_number {
-            eprintln!("Warning: PR #{} not found in commit description.", pr_number);
+            eprintln!(
+                "Warning: PR #{} not found in commit description.",
+                pr_number
+            );
         } else {
             eprintln!("Warning: No PRs found in commit description to unlink.");
         }
         return;
     }
-    
-    let new_description = new_description_lines.join("
-");
 
-    // 4. Update commit description.
+    let new_description = new_description_lines.join("\n");
+
+    // 3. Update commit description.
     let status = Command::new("jj")
         .arg("describe")
         .arg("-r")
@@ -110,15 +82,18 @@ pub fn run(args: &UnlinkArgs) {
         .arg(&repo_root)
         .status()
         .expect("Failed to execute jj describe");
-    
+
     if !status.success() {
         eprintln!("jj describe failed");
         exit(1);
     }
-    
+
     if let Some(pr_number) = args.pr_number {
-        println!("Unlinked PR #{} from commit {}", pr_number, commit_id);
+        println!(
+            "Unlinked PR #{} from changeset {}",
+            pr_number, commit.change_id
+        );
     } else {
-        println!("Unlinked all PRs from commit {}", commit_id);
+        println!("Unlinked all PRs from changeset {}", commit.change_id);
     }
 }

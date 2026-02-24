@@ -4,7 +4,6 @@ use std::process::Command;
 
 #[derive(Debug, Default)]
 pub struct Config {
-    pub auth: Option<String>,
     pub upstream: Option<String>,
     pub extra: HashMap<String, String>,
 }
@@ -13,7 +12,7 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
     let output = Command::new("jj")
         .arg("config")
         .arg("list")
-        .arg("--repo")
+        .arg("-R")
         .arg(repo_path)
         .output()
         .map_err(|e| format!("Failed to execute jj: {}", e))?;
@@ -41,8 +40,8 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
                     value = &value[1..value.len() - 1];
                 }
 
-                if key == "jellycat.auth" {
-                    config.auth = Some(value.to_string());
+                if key == "jellycat.upstream" {
+                    config.upstream = Some(value.to_string());
                 } else {
                     config.extra.insert(key.to_string(), value.to_string());
                 }
@@ -51,4 +50,23 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
     }
 
     Ok(config)
+}
+
+pub fn save(repo_path: &Path, key: &str, value: &str) -> Result<(), String> {
+    let status = Command::new("jj")
+        .arg("config")
+        .arg("set")
+        .arg("--repo")
+        .arg(key)
+        .arg(value)
+        .arg("-R")
+        .arg(repo_path)
+        .status()
+        .map_err(|e| format!("Failed to execute jj: {}", e))?;
+
+    if !status.success() {
+        return Err("jj config set failed".to_string());
+    }
+
+    Ok(())
 }

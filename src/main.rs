@@ -15,6 +15,13 @@ struct Cli {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
+    if let Commands::Init(args) = &cli.command {
+        commands::init::run(args);
+        return;
+    }
+
     let repo_root = match repo::find_root() {
         Some(root) => root,
         None => {
@@ -31,10 +38,14 @@ fn main() {
         }
     };
 
-    let cli = Cli::parse();
+    if config.upstream.is_none() {
+        eprintln!("jellycat upstream not configured. Please run `jellycat init`.");
+        exit(1);
+    }
 
     match &cli.command {
         Commands::Submit(args) => commands::submit::run(args, &config),
         Commands::Status(args) => commands::status::run(args, &config),
+        Commands::Init(_) => unreachable!(),
     }
 }

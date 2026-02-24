@@ -1,5 +1,6 @@
 use clap::Subcommand;
 
+pub mod init;
 pub mod status;
 pub mod submit;
 
@@ -7,4 +8,5 @@ pub mod submit;
 pub enum Commands {
     Submit(submit::SubmitArgs),
     Status(status::StatusArgs),
+    Init(init::InitArgs),
 }

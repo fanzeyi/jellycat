@@ -17,9 +17,20 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    if let Commands::Init(args) = &cli.command {
-        commands::init::run(args);
-        return;
+    match &cli.command {
+        Commands::Init(args) => {
+            commands::init::run(args);
+            return;
+        }
+        Commands::Link(args) => {
+            commands::link::run(args);
+            return;
+        }
+        Commands::Unlink(args) => {
+            commands::unlink::run(args);
+            return;
+        }
+        _ => {} // Continue for commands that need config
     }
 
     let repo_root = match repo::find_root() {
@@ -46,6 +57,6 @@ fn main() {
     match &cli.command {
         Commands::Submit(args) => commands::submit::run(args, &config),
         Commands::Status(args) => commands::status::run(args, &config),
-        Commands::Init(_) => unreachable!(),
+        Commands::Init(_) | Commands::Link(_) | Commands::Unlink(_) => unreachable!(),
     }
 }

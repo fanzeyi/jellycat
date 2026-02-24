@@ -1,3 +1,4 @@
+use crate::config::Config;
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -6,6 +7,7 @@ pub struct StatusArgs {
     pub revision: Option<String>,
 }
 
-pub fn run(args: &StatusArgs) {
+pub fn run(args: &StatusArgs, config: &Config) {
     println!("Status command with revision: {:?}", args.revision);
+    println!("Config: {:?}", config);
 }

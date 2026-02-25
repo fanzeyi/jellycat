@@ -19,9 +19,71 @@ struct JjLogCommit {
     description: String,
 }
 
+#[derive(Deserialize, Debug)]
+struct GhHost {
+    login: String,
+    token: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GhAuthStatus {
+    hosts: std::collections::HashMap<String, Vec<GhHost>>,
+}
+
 pub fn run(args: &SubmitArgs, config: &Config) {
+    let auth_output = Command::new("gh")
+        .arg("auth")
+        .arg("status")
+        .arg("--json")
+        .arg("hosts")
+        .arg("--show-token")
+        .output();
+
+    let auth_output = match auth_output {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Error: GitHub CLI ('gh') is not installed.");
+            eprintln!("Please install it from https://cli.github.com/ or using your package manager.");
+            exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error executing 'gh': {}", e);
+            exit(1);
+        }
+    };
+
+    if !auth_output.status.success() {
+        eprintln!(
+            "Error: gh auth status failed.\nMake sure you are logged in to GitHub CLI by running 'gh auth login'."
+        );
+        exit(1);
+    }
+
+    let auth_status: GhAuthStatus = match serde_json::from_slice(&auth_output.stdout) {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!("Error parsing 'gh auth status' JSON: {}", e);
+            exit(1);
+        }
+    };
+
+    // Try to find the token for github.com
+    let (username, _github_token) = auth_status
+        .hosts
+        .get("github.com")
+        .and_then(|hosts| hosts.first())
+        .map(|h| (h.login.clone(), h.token.clone()))
+        .unwrap_or_else(|| {
+            eprintln!("Error: No github.com authentication found.");
+            eprintln!("Please run 'gh auth login' to authenticate.");
+            exit(1);
+        });
+
+    println!("Authenticated as GitHub user: {}", username);
+
     println!("Submit command with revset: {}", args.revset);
     println!("Config: {:?}", config);
+    // println!("GitHub Token: {}", github_token); // For debugging, usually don't print secrets
 
     let repo_root = match repo::find_root() {
         Some(root) => root,

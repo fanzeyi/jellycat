@@ -35,6 +35,7 @@ Jellycat is a CLI tool designed to bridge the gap between Jujutsu (`jj`)'s local
 - **Command Execution**: Use the `Jj` client for any Jujutsu-related operations. For GitHub operations, use `gh` CLI via `std::process::Command`.
 - **Commit Descriptions**: Jellycat relies on `PR: #NUM` markers in commit descriptions to track Pull Request associations.
 - **Code Style**: Follow standard idiomatic Rust conventions (`cargo fmt`).
+- **JSON Communication**: Prefer to use JSON if the command we use offers it. It's more reliable when parsing outputs.
 
 ## Testing
 

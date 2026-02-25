@@ -107,7 +107,7 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
             }
         }
 
-        let bookmark_name = if let Some(pr_num) = pr_number {
+        let (bookmark_name, is_new_pr) = if let Some(pr_num) = pr_number {
             println!("Found PR #{} for commit {}, looking up bookmark name", pr_num, commit.commit_id);
             let pr_view_output = Command::new("gh")
                 .arg("pr")
@@ -130,16 +130,19 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
             let pr_data: serde_json::Value = serde_json::from_slice(&pr_view_output.stdout)
                 .context("Failed to parse gh pr view JSON")?;
 
-            pr_data["headRefName"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("Could not find headRefName in PR view output"))?
-                .to_string()
+            (
+                pr_data["headRefName"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Could not find headRefName in PR view output"))?
+                    .to_string(),
+                false,
+            )
         } else {
             println!(
                 "No PR found for commit {}, generating bookmark",
                 commit.commit_id
             );
-            format!("{}{}", bookmark_prefix, &commit.change_id[..12])
+            (format!("{}{}", bookmark_prefix, &commit.change_id[..12]), true)
         };
 
         println!(
@@ -155,6 +158,50 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
         );
         jj.git_push(&origin_remote, &bookmark_name)
             .context("jj git push failed")?;
+
+        if is_new_pr {
+            println!("Creating Pull Request on GitHub...");
+            let pr_create_output = Command::new("gh")
+                .arg("pr")
+                .arg("create")
+                .arg("--repo")
+                .arg(&upstream_repo)
+                .arg("--head")
+                .arg(format!("{}:{}", username, bookmark_name))
+                .arg("--title")
+                .arg(commit.description.lines().next().unwrap_or("No description"))
+                .arg("--body")
+                .arg(&commit.description)
+                .output()
+                .context("Failed to execute gh pr create")?;
+
+            if !pr_create_output.status.success() {
+                return Err(anyhow::anyhow!(
+                    "gh pr create failed: {}",
+                    String::from_utf8_lossy(&pr_create_output.stderr).trim()
+                ));
+            }
+
+            let pr_url = String::from_utf8_lossy(&pr_create_output.stdout).trim().to_string();
+            println!("Pull Request created: {}", pr_url);
+
+            // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+            let pr_number = pr_url
+                .split('/')
+                .last()
+                .and_then(|s| s.parse::<u32>().ok())
+                .ok_or_else(|| anyhow::anyhow!("Failed to parse PR number from URL: {}", pr_url))?;
+
+            println!("Linking PR #{} to commit {}", pr_number, commit.commit_id);
+            let mut new_description = commit.description.trim_end().to_string();
+            if !new_description.is_empty() {
+                new_description.push_str("\n\n");
+            }
+            new_description.push_str(&format!("PR: #{}", pr_number));
+
+            jj.describe(&commit.commit_id, &new_description)
+                .context("jj describe failed to update commit with PR link")?;
+        }
     }
 
     Ok(())

@@ -69,7 +69,7 @@ pub fn run(args: &SubmitArgs, config: &Config) {
     };
 
     // Try to find the token for github.com
-    let (username, github_token) = auth_status
+    let (username, _github_token) = auth_status
         .hosts
         .get("github.com")
         .and_then(|hosts| hosts.first())
@@ -118,8 +118,16 @@ pub fn run(args: &SubmitArgs, config: &Config) {
         .cloned()
         .unwrap_or_else(|| "jellycat/".to_string());
 
-    let upstream = config
+    let upstream_repo = config
         .upstream
+        .clone()
+        .unwrap_or_else(|| {
+            eprintln!("Error: jellycat.upstream not configured. Run 'jellycat init'.");
+            exit(1);
+        });
+
+    let origin_remote = config
+        .origin
         .clone()
         .unwrap_or_else(|| "origin".to_string());
 
@@ -153,7 +161,7 @@ pub fn run(args: &SubmitArgs, config: &Config) {
                 .arg("view")
                 .arg(pr_num.to_string())
                 .arg("--repo")
-                .arg(&upstream)
+                .arg(&upstream_repo)
                 .arg("--json")
                 .arg("headRefName")
                 .output()
@@ -204,13 +212,13 @@ pub fn run(args: &SubmitArgs, config: &Config) {
 
         println!(
             "Pushing bookmark '{}' to remote '{}'",
-            bookmark_name, upstream
+            bookmark_name, origin_remote
         );
         let status = Command::new("jj")
             .arg("git")
             .arg("push")
             .arg("--remote")
-            .arg(&upstream)
+            .arg(&origin_remote)
             .arg("--bookmark")
             .arg(&bookmark_name)
             .arg("-R")

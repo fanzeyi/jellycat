@@ -5,6 +5,7 @@ use std::process::Command;
 #[derive(Debug, Default)]
 pub struct Config {
     pub upstream: Option<String>,
+    pub origin: Option<String>,
     pub extra: HashMap<String, String>,
 }
 
@@ -42,6 +43,8 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
 
                 if key == "jellycat.upstream" {
                     config.upstream = Some(value.to_string());
+                } else if key == "jellycat.origin" {
+                    config.origin = Some(value.to_string());
                 } else {
                     config.extra.insert(key.to_string(), value.to_string());
                 }

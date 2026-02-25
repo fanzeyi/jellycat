@@ -3,6 +3,7 @@ use std::process::exit;
 
 mod commands;
 mod config;
+mod jj;
 mod repo;
 
 use commands::Commands;

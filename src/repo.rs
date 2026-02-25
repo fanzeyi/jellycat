@@ -1,7 +1,7 @@
+use crate::jj::Jj;
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct JjLogCommit {
@@ -22,26 +22,9 @@ pub fn find_root() -> Option<PathBuf> {
 }
 
 pub fn get_single_commit(repo_root: &Path, revset: &str) -> Result<JjLogCommit, String> {
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg(r#"json(self)"#)
-        .arg("-R")
-        .arg(repo_root)
-        .output()
-        .map_err(|e| format!("Failed to execute jj log: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "jj log failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+    let jj = Jj::new(repo_root.to_path_buf());
+    let output_str = jj.log(revset, "json(self)")?;
     
-    let output_str = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = output_str.lines().collect();
     if lines.len() != 1 {
         return Err(format!(

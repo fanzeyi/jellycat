@@ -1,8 +1,9 @@
 use crate::config;
+use crate::jj::Jj;
 use crate::repo;
 use clap::Args;
 use std::io::{self, Write};
-use std::process::{exit, Command};
+use std::process::exit;
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -19,6 +20,8 @@ pub fn run(args: &InitArgs) {
             exit(1);
         }
     };
+
+    let jj = Jj::new(repo_root.clone());
 
     let config = match config::load(&repo_root) {
         Ok(c) => c,
@@ -80,21 +83,14 @@ pub fn run(args: &InitArgs) {
     }
 
     if config.origin.is_none() || args.force {
-        let remotes_output = Command::new("jj")
-            .arg("git")
-            .arg("remote")
-            .arg("list")
-            .arg("-R")
-            .arg(&repo_root)
-            .output()
-            .expect("Failed to execute jj git remote list");
+        let remotes_str = match jj.git_remote_list() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error listing git remotes: {}", e);
+                exit(1);
+            }
+        };
 
-        if !remotes_output.status.success() {
-            eprintln!("Error listing git remotes: {}", String::from_utf8_lossy(&remotes_output.stderr));
-            exit(1);
-        }
-
-        let remotes_str = String::from_utf8_lossy(&remotes_output.stdout);
         let remotes: Vec<(String, String)> = remotes_str
             .lines()
             .filter_map(|line| {

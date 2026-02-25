@@ -1,8 +1,9 @@
 use crate::config::Config;
+use crate::jj::Jj;
 use crate::repo;
 use clap::Args;
+use serde::Deserialize;
 use serde_json;
-use serde::Deserialize; // Re-add this import
 use std::process::{exit, Command};
 
 #[derive(Args, Debug)]
@@ -90,27 +91,15 @@ pub fn run(args: &SubmitArgs, config: &Config) {
         }
     };
 
-    let output = Command::new("jj")
-        .arg("log")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("--no-graph")
-        .arg("--template")
-        .arg(r#"json(self)"#) // Changed template to json(self)
-        .arg("-R")
-        .arg(&repo_root)
-        .output()
-        .expect("Failed to execute jj log");
+    let jj = Jj::new(repo_root);
 
-    if !output.status.success() {
-        eprintln!(
-            "jj log failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        exit(1);
-    }
-
-    let output_str = String::from_utf8_lossy(&output.stdout);
+    let output_str = match jj.log(&args.revset, "json(self)") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("jj log failed: {}", e);
+            exit(1);
+        }
+    };
 
     let bookmark_prefix = config
         .extra
@@ -194,19 +183,8 @@ pub fn run(args: &SubmitArgs, config: &Config) {
             "Setting bookmark '{}' for commit {}",
             bookmark_name, commit.commit_id
         );
-        let status = Command::new("jj")
-            .arg("bookmark")
-            .arg("set")
-            .arg(&bookmark_name)
-            .arg("-r")
-            .arg(&commit.commit_id)
-            .arg("-R")
-            .arg(&repo_root)
-            .status()
-            .expect("Failed to execute jj bookmark set");
-
-        if !status.success() {
-            eprintln!("Error: jj bookmark set failed");
+        if let Err(e) = jj.bookmark_set(&bookmark_name, &commit.commit_id) {
+            eprintln!("Error: {}", e);
             exit(1);
         }
 
@@ -214,20 +192,8 @@ pub fn run(args: &SubmitArgs, config: &Config) {
             "Pushing bookmark '{}' to remote '{}'",
             bookmark_name, origin_remote
         );
-        let status = Command::new("jj")
-            .arg("git")
-            .arg("push")
-            .arg("--remote")
-            .arg(&origin_remote)
-            .arg("--bookmark")
-            .arg(&bookmark_name)
-            .arg("-R")
-            .arg(&repo_root)
-            .status()
-            .expect("Failed to execute jj git push");
-
-        if !status.success() {
-            eprintln!("Error: jj git push failed");
+        if let Err(e) = jj.git_push(&origin_remote, &bookmark_name) {
+            eprintln!("Error: {}", e);
             exit(1);
         }
     }

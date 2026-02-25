@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
+use crate::jj::Jj;
 
 #[derive(Debug, Default)]
 pub struct Config {
@@ -10,22 +10,8 @@ pub struct Config {
 }
 
 pub fn load(repo_path: &Path) -> Result<Config, String> {
-    let output = Command::new("jj")
-        .arg("config")
-        .arg("list")
-        .arg("-R")
-        .arg(repo_path)
-        .output()
-        .map_err(|e| format!("Failed to execute jj: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "jj config list failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let jj = Jj::new(repo_path.to_path_buf());
+    let stdout = jj.config_list()?;
     let mut config = Config::default();
 
     for line in stdout.lines() {
@@ -56,20 +42,6 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
 }
 
 pub fn save(repo_path: &Path, key: &str, value: &str) -> Result<(), String> {
-    let status = Command::new("jj")
-        .arg("config")
-        .arg("set")
-        .arg("--repo")
-        .arg(key)
-        .arg(value)
-        .arg("-R")
-        .arg(repo_path)
-        .status()
-        .map_err(|e| format!("Failed to execute jj: {}", e))?;
-
-    if !status.success() {
-        return Err("jj config set failed".to_string());
-    }
-
-    Ok(())
+    let jj = Jj::new(repo_path.to_path_buf());
+    jj.config_set(key, value)
 }

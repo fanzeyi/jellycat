@@ -1,9 +1,9 @@
 use crate::config;
 use crate::jj::Jj;
 use crate::repo;
+use anyhow::{anyhow, Context, Result};
 use clap::Args;
 use std::io::{self, Write};
-use std::process::exit;
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -12,29 +12,18 @@ pub struct InitArgs {
     force: bool,
 }
 
-pub fn run(args: &InitArgs) {
-    let repo_root = match repo::find_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("Error: Not a jujutsu repository (or any of the parent directories): .jj");
-            exit(1);
-        }
-    };
+pub fn run(args: &InitArgs) -> Result<()> {
+    let repo_root = repo::find_root()
+        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     let jj = Jj::new(repo_root.clone());
 
-    let config = match config::load(&repo_root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error loading config: {}", e);
-            exit(1);
-        }
-    };
+    let config = config::load(&repo_root).context("Error loading config")?;
 
     if config.upstream.is_some() && config.origin.is_some() {
         if !args.force {
             println!("jellycat upstream and origin are already configured. Use --force to reconfigure.");
-            return;
+            return Ok(());
         } else {
             println!("Reconfiguring jellycat due to --force flag.");
         }
@@ -47,12 +36,11 @@ pub fn run(args: &InitArgs) {
         let mut upstream_input = String::new();
         io::stdin()
             .read_line(&mut upstream_input)
-            .expect("Failed to read line");
+            .context("Failed to read line")?;
         let mut owner_repo = upstream_input.trim().to_string();
 
         if owner_repo.is_empty() {
-            eprintln!("Upstream repo cannot be empty. Aborting.");
-            exit(1);
+            return Err(anyhow!("Upstream repo cannot be empty."));
         }
 
         // Remove known prefixes
@@ -69,27 +57,20 @@ pub fn run(args: &InitArgs) {
 
         // Validate the format: should be "owner/repo"
         if !owner_repo.contains('/') || owner_repo.starts_with('/') || owner_repo.ends_with('/') {
-            eprintln!("Error: Invalid owner/repo format. Expected 'owner/repo', but got '{}'", owner_repo);
-            exit(1);
+            return Err(anyhow!(
+                "Error: Invalid owner/repo format. Expected 'owner/repo', but got '{}'",
+                owner_repo
+            ));
         }
 
-
-        if let Err(e) = config::save(&repo_root, "jellycat.upstream", &owner_repo) {
-            eprintln!("Error saving config: {}", e);
-            exit(1);
-        }
+        config::save(&repo_root, "jellycat.upstream", &owner_repo)
+            .context("Error saving config")?;
 
         println!("Upstream repo configured successfully as: {}", owner_repo);
     }
 
     if config.origin.is_none() || args.force {
-        let remotes_str = match jj.git_remote_list() {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Error listing git remotes: {}", e);
-                exit(1);
-            }
-        };
+        let remotes_str = jj.git_remote_list().context("Error listing git remotes")?;
 
         let remotes: Vec<(String, String)> = remotes_str
             .lines()
@@ -102,8 +83,9 @@ pub fn run(args: &InitArgs) {
             .collect();
 
         if remotes.is_empty() {
-            eprintln!("Error: No git remotes found. Please add a remote using 'jj git remote add'.");
-            exit(1);
+            return Err(anyhow!(
+                "No git remotes found. Please add a remote using 'jj git remote add'."
+            ));
         }
 
         println!("\nAvailable git remotes:");
@@ -115,22 +97,26 @@ pub fn run(args: &InitArgs) {
         io::stdout().flush().unwrap();
 
         let mut selection = String::new();
-        io::stdin().read_line(&mut selection).expect("Failed to read line");
+        io::stdin()
+            .read_line(&mut selection)
+            .context("Failed to read line")?;
         let selection: usize = match selection.trim().parse() {
             Ok(n) if n > 0 && n <= remotes.len() => n,
             _ => {
-                eprintln!("Invalid selection. Aborting.");
-                exit(1);
+                return Err(anyhow!("Invalid selection."));
             }
         };
 
         let (selected_remote_name, _) = &remotes[selection - 1];
 
-        if let Err(e) = config::save(&repo_root, "jellycat.origin", selected_remote_name) {
-            eprintln!("Error saving config: {}", e);
-            exit(1);
-        }
+        config::save(&repo_root, "jellycat.origin", selected_remote_name)
+            .context("Error saving config")?;
 
-        println!("Origin remote configured successfully as: {}", selected_remote_name);
+        println!(
+            "Origin remote configured successfully as: {}",
+            selected_remote_name
+        );
     }
+
+    Ok(())
 }

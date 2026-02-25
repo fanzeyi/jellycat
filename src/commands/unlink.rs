@@ -1,6 +1,7 @@
 use crate::repo;
+use crate::jj::Jj;
+use anyhow::{anyhow, Result, Context};
 use clap::Args;
-use std::process::{Command, exit};
 
 #[derive(Args, Debug)]
 pub struct UnlinkArgs {
@@ -12,23 +13,15 @@ pub struct UnlinkArgs {
     pub pr_number: Option<u32>,
 }
 
-pub fn run(args: &UnlinkArgs) {
-    let repo_root = match repo::find_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("Error: Not a jujutsu repository (or any of the parent directories): .jj");
-            exit(1);
-        }
-    };
+pub fn run(args: &UnlinkArgs) -> Result<()> {
+    let repo_root = repo::find_root()
+        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+
+    let jj = Jj::new(repo_root.clone());
 
     // 1. Get the commit.
-    let commit = match repo::get_single_commit(&repo_root, &args.revset) {
-        Ok(commit) => commit,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            exit(1);
-        }
-    };
+    let commit = repo::get_single_commit(&repo_root, &args.revset)
+        .context("Failed to get commit")?;
 
     // 2. Filter out PR lines.
     let mut new_description_lines = Vec::new();
@@ -66,27 +59,14 @@ pub fn run(args: &UnlinkArgs) {
         } else {
             eprintln!("Warning: No PRs found in commit description to unlink.");
         }
-        return;
+        return Ok(());
     }
 
     let new_description = new_description_lines.join("\n");
 
     // 3. Update commit description.
-    let status = Command::new("jj")
-        .arg("describe")
-        .arg("-r")
-        .arg(&args.revset)
-        .arg("-m")
-        .arg(&new_description)
-        .arg("-R")
-        .arg(&repo_root)
-        .status()
-        .expect("Failed to execute jj describe");
-
-    if !status.success() {
-        eprintln!("jj describe failed");
-        exit(1);
-    }
+    jj.describe(&args.revset, &new_description)
+        .context("jj describe failed")?;
 
     if let Some(pr_number) = args.pr_number {
         println!(
@@ -96,4 +76,6 @@ pub fn run(args: &UnlinkArgs) {
     } else {
         println!("Unlinked all PRs from changeset {}", commit.change_id);
     }
+
+    Ok(())
 }

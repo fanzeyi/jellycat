@@ -7,7 +7,8 @@ pub struct StatusArgs {
     pub revision: Option<String>,
 }
 
-pub fn run(args: &StatusArgs, config: &Config) {
+pub fn run(args: &StatusArgs, config: &Config) -> anyhow::Result<()> {
     println!("Status command with revision: {:?}", args.revision);
     println!("Config: {:?}", config);
+    Ok(())
 }

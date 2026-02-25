@@ -2,6 +2,7 @@ use crate::jj::Jj;
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
+use anyhow::{anyhow, Result, Context};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct JjLogCommit {
@@ -21,18 +22,18 @@ pub fn find_root() -> Option<PathBuf> {
     }
 }
 
-pub fn get_single_commit(repo_root: &Path, revset: &str) -> Result<JjLogCommit, String> {
+pub fn get_single_commit(repo_root: &Path, revset: &str) -> Result<JjLogCommit> {
     let jj = Jj::new(repo_root.to_path_buf());
     let output_str = jj.log(revset, "json(self)")?;
     
     let lines: Vec<&str> = output_str.lines().collect();
     if lines.len() != 1 {
-        return Err(format!(
+        return Err(anyhow!(
             "revset must resolve to exactly one commit, but got {}",
             lines.len()
         ));
     }
 
     serde_json::from_str(lines[0])
-        .map_err(|e| format!("Error parsing jj log JSON output: {}. Line: {}", e, lines[0]))
+        .with_context(|| format!("Error parsing jj log JSON output. Line: {}", lines[0]))
 }

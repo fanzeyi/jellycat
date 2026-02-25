@@ -1,10 +1,11 @@
 use crate::config::Config;
 use crate::jj::Jj;
 use crate::repo;
+use anyhow::Context;
 use clap::Args;
 use serde::Deserialize;
 use serde_json;
-use std::process::{exit, Command};
+use std::process::Command;
 
 #[derive(Args, Debug)]
 pub struct SubmitArgs {
@@ -32,42 +33,23 @@ struct GhAuthStatus {
     hosts: std::collections::HashMap<String, Vec<GhHost>>,
 }
 
-pub fn run(args: &SubmitArgs, config: &Config) {
+pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
     let auth_output = Command::new("gh")
         .arg("auth")
         .arg("status")
         .arg("--json")
         .arg("hosts")
         .arg("--show-token")
-        .output();
-
-    let auth_output = match auth_output {
-        Ok(output) => output,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            eprintln!("Error: GitHub CLI ('gh') is not installed.");
-            eprintln!("Please install it from https://cli.github.com/ or using your package manager.");
-            exit(1);
-        }
-        Err(e) => {
-            eprintln!("Error executing 'gh': {}", e);
-            exit(1);
-        }
-    };
+        .output()?;
 
     if !auth_output.status.success() {
-        eprintln!(
-            "Error: gh auth status failed.\nMake sure you are logged in to GitHub CLI by running 'gh auth login'."
-        );
-        exit(1);
+        return Err(anyhow::anyhow!(
+            "gh auth status failed.\nMake sure you are logged in to GitHub CLI by running 'gh auth login'."
+        ));
     }
 
-    let auth_status: GhAuthStatus = match serde_json::from_slice(&auth_output.stdout) {
-        Ok(status) => status,
-        Err(e) => {
-            eprintln!("Error parsing 'gh auth status' JSON: {}", e);
-            exit(1);
-        }
-    };
+    let auth_status: GhAuthStatus = serde_json::from_slice(&auth_output.stdout)
+        .context("Error parsing 'gh auth status' JSON")?;
 
     // Try to find the token for github.com
     let (username, _github_token) = auth_status
@@ -75,31 +57,21 @@ pub fn run(args: &SubmitArgs, config: &Config) {
         .get("github.com")
         .and_then(|hosts| hosts.first())
         .map(|h| (h.login.clone(), h.token.clone()))
-        .unwrap_or_else(|| {
-            eprintln!("Error: No github.com authentication found.");
-            eprintln!("Please run 'gh auth login' to authenticate.");
-            exit(1);
-        });
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No github.com authentication found. Please run 'gh auth login' to authenticate."
+            )
+        })?;
 
     println!("Authenticated as GitHub user: {}", username);
 
-    let repo_root = match repo::find_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("Error: Not a jujutsu repository (or any of the parent directories): .jj");
-            exit(1);
-        }
-    };
+    let repo_root = repo::find_root()
+        .ok_or_else(|| anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     let jj = Jj::new(repo_root);
 
-    let output_str = match jj.log(&args.revset, "json(self)") {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("jj log failed: {}", e);
-            exit(1);
-        }
-    };
+    let output_str = jj.log(&args.revset, "json(self)")
+        .context("jj log failed")?;
 
     let bookmark_prefix = config
         .extra
@@ -110,10 +82,7 @@ pub fn run(args: &SubmitArgs, config: &Config) {
     let upstream_repo = config
         .upstream
         .clone()
-        .unwrap_or_else(|| {
-            eprintln!("Error: jellycat.upstream not configured. Run 'jellycat init'.");
-            exit(1);
-        });
+        .ok_or_else(|| anyhow::anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
 
     let origin_remote = config
         .origin
@@ -125,13 +94,8 @@ pub fn run(args: &SubmitArgs, config: &Config) {
             continue;
         }
 
-        let commit: JjLogCommit = match serde_json::from_str(line) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error parsing jj log JSON output: {}. Line: {}", e, line);
-                exit(1);
-            }
-        };
+        let commit: JjLogCommit = serde_json::from_str(line)
+            .with_context(|| format!("Error parsing jj log JSON output. Line: {}", line))?;
 
         let mut pr_number = None;
         for desc_line in commit.description.lines() {
@@ -154,22 +118,21 @@ pub fn run(args: &SubmitArgs, config: &Config) {
                 .arg("--json")
                 .arg("headRefName")
                 .output()
-                .expect("Failed to execute gh pr view");
+                .context("Failed to execute gh pr view")?;
 
             if !pr_view_output.status.success() {
-                eprintln!(
+                return Err(anyhow::anyhow!(
                     "gh pr view failed: {}",
                     String::from_utf8_lossy(&pr_view_output.stderr).trim()
-                );
-                exit(1);
+                ));
             }
 
             let pr_data: serde_json::Value = serde_json::from_slice(&pr_view_output.stdout)
-                .expect("Failed to parse gh pr view JSON");
+                .context("Failed to parse gh pr view JSON")?;
 
             pr_data["headRefName"]
                 .as_str()
-                .expect("Could not find headRefName in PR view output")
+                .ok_or_else(|| anyhow::anyhow!("Could not find headRefName in PR view output"))?
                 .to_string()
         } else {
             println!(
@@ -183,18 +146,16 @@ pub fn run(args: &SubmitArgs, config: &Config) {
             "Setting bookmark '{}' for commit {}",
             bookmark_name, commit.commit_id
         );
-        if let Err(e) = jj.bookmark_set(&bookmark_name, &commit.commit_id) {
-            eprintln!("Error: {}", e);
-            exit(1);
-        }
+        jj.bookmark_set(&bookmark_name, &commit.commit_id)
+            .context("jj bookmark set failed")?;
 
         println!(
             "Pushing bookmark '{}' to remote '{}'",
             bookmark_name, origin_remote
         );
-        if let Err(e) = jj.git_push(&origin_remote, &bookmark_name) {
-            eprintln!("Error: {}", e);
-            exit(1);
-        }
+        jj.git_push(&origin_remote, &bookmark_name)
+            .context("jj git push failed")?;
     }
+
+    Ok(())
 }

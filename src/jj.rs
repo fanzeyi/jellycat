@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -16,15 +17,15 @@ impl Jj {
         cmd
     }
 
-    pub fn config_list(&self) -> Result<String, String> {
+    pub fn config_list(&self) -> Result<String> {
         let output = self.cmd()
             .arg("config")
             .arg("list")
             .output()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!(
+            return Err(anyhow!(
                 "jj config list failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
@@ -33,7 +34,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    pub fn config_set(&self, key: &str, value: &str) -> Result<(), String> {
+    pub fn config_set(&self, key: &str, value: &str) -> Result<()> {
         let status = self.cmd()
             .arg("config")
             .arg("set")
@@ -41,25 +42,25 @@ impl Jj {
             .arg(key)
             .arg(value)
             .status()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !status.success() {
-            return Err("jj config set failed".to_string());
+            return Err(anyhow!("jj config set failed"));
         }
 
         Ok(())
     }
 
-    pub fn git_remote_list(&self) -> Result<String, String> {
+    pub fn git_remote_list(&self) -> Result<String> {
         let output = self.cmd()
             .arg("git")
             .arg("remote")
             .arg("list")
             .output()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!(
+            return Err(anyhow!(
                 "jj git remote list failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
@@ -68,7 +69,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    pub fn log(&self, revset: &str, template: &str) -> Result<String, String> {
+    pub fn log(&self, revset: &str, template: &str) -> Result<String> {
         let output = self.cmd()
             .arg("log")
             .arg("-r")
@@ -77,10 +78,10 @@ impl Jj {
             .arg("--template")
             .arg(template)
             .output()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !output.status.success() {
-            return Err(format!(
+            return Err(anyhow!(
                 "jj log failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             ));
@@ -89,7 +90,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    pub fn bookmark_set(&self, name: &str, revision: &str) -> Result<(), String> {
+    pub fn bookmark_set(&self, name: &str, revision: &str) -> Result<()> {
         let status = self.cmd()
             .arg("bookmark")
             .arg("set")
@@ -97,16 +98,33 @@ impl Jj {
             .arg("-r")
             .arg(revision)
             .status()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !status.success() {
-            return Err("jj bookmark set failed".to_string());
+            return Err(anyhow!("jj bookmark set failed"));
         }
 
         Ok(())
     }
 
-    pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<(), String> {
+    pub fn describe(&self, revset: &str, message: &str) -> Result<()> {
+        let status = self.cmd()
+            .arg("describe")
+            .arg("-r")
+            .arg(revset)
+            .arg("-m")
+            .arg(message)
+            .status()
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
+
+        if !status.success() {
+            return Err(anyhow!("jj describe failed"));
+        }
+
+        Ok(())
+    }
+
+    pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
         let status = self.cmd()
             .arg("git")
             .arg("push")
@@ -115,10 +133,10 @@ impl Jj {
             .arg("--bookmark")
             .arg(bookmark)
             .status()
-            .map_err(|e| format!("Failed to execute jj: {}", e))?;
+            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
         if !status.success() {
-            return Err("jj git push failed".to_string());
+            return Err(anyhow!("jj git push failed"));
         }
 
         Ok(())

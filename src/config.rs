@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use crate::jj::Jj;
+use anyhow::Result;
 
 #[derive(Debug, Default)]
 pub struct Config {
@@ -9,7 +10,7 @@ pub struct Config {
     pub extra: HashMap<String, String>,
 }
 
-pub fn load(repo_path: &Path) -> Result<Config, String> {
+pub fn load(repo_path: &Path) -> Result<Config> {
     let jj = Jj::new(repo_path.to_path_buf());
     let stdout = jj.config_list()?;
     let mut config = Config::default();
@@ -41,7 +42,7 @@ pub fn load(repo_path: &Path) -> Result<Config, String> {
     Ok(config)
 }
 
-pub fn save(repo_path: &Path, key: &str, value: &str) -> Result<(), String> {
+pub fn save(repo_path: &Path, key: &str, value: &str) -> Result<()> {
     let jj = Jj::new(repo_path.to_path_buf());
     jj.config_set(key, value)
 }

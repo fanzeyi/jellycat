@@ -1,5 +1,5 @@
 use clap::Parser;
-use std::process::exit;
+use anyhow::Context;
 
 mod commands;
 mod config;
@@ -15,44 +15,29 @@ struct Cli {
     command: Commands,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
         Commands::Init(args) => {
-            commands::init::run(args);
-            return;
+            return commands::init::run(args);
         }
         Commands::Link(args) => {
-            commands::link::run(args);
-            return;
+            return commands::link::run(args);
         }
         Commands::Unlink(args) => {
-            commands::unlink::run(args);
-            return;
+            return commands::unlink::run(args);
         }
         _ => {} // Continue for commands that need config
     }
 
-    let repo_root = match repo::find_root() {
-        Some(root) => root,
-        None => {
-            eprintln!("Error: Not a jujutsu repository (or any of the parent directories): .jj");
-            exit(1);
-        }
-    };
+    let repo_root = repo::find_root()
+        .ok_or_else(|| anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
-    let config = match config::load(&repo_root) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error loading config: {}", e);
-            exit(1);
-        }
-    };
+    let config = config::load(&repo_root).context("Error loading config")?;
 
     if config.upstream.is_none() {
-        eprintln!("jellycat upstream not configured. Please run `jellycat init`.");
-        exit(1);
+        return Err(anyhow::anyhow!("jellycat upstream not configured. Please run `jellycat init`."));
     }
 
     match &cli.command {

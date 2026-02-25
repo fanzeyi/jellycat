@@ -92,6 +92,8 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| "origin".to_string());
 
+    tracing::debug!("jj log output: {}", output_str);
+
     for line in output_str.lines() {
         if line.is_empty() {
             continue;
@@ -366,20 +368,20 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
 
             let mut updated_stack_md = String::new();
             updated_stack_md.push_str(&updated_nav.join(" | "));
-            updated_stack_md.push_str("\n\n---\n\n<details>\n<summary><b>Stack</b></summary>\n\n");
+            updated_stack_md.push_str("\n\n<details>\n<summary><b>Stack</b></summary>\n\n");
             for (cid, pnum, _desc) in stack_prs.iter() {
                 let is_current = cid == &commit.commit_id;
                 let bullet = if is_current { "  *" } else { "*" };
 
                 if let Some(n) = pnum {
                     if is_current {
-                        updated_stack_md.push_str(&format!("{} #{} **Current ↩︎**\n", bullet, n));
+                        updated_stack_md.push_str(&format!("{} #{} **⇤ Current**\n", bullet, n));
                     } else {
                         updated_stack_md.push_str(&format!("{} #{}\n", bullet, n));
                     }
                 }
             }
-            updated_stack_md.push_str("\n</details>\n\n<!-- jellycat -->\n");
+            updated_stack_md.push_str("\n</details>\n\n----\n\n<!-- jellycat -->\n");
 
             let full_body = format!("{}\n{}", updated_stack_md, user_content);
 

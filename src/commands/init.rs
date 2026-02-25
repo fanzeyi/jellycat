@@ -1,7 +1,7 @@
 use crate::config;
 use crate::jj::Jj;
 use crate::repo;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use std::io::{self, Write};
 
@@ -13,8 +13,9 @@ pub struct InitArgs {
 }
 
 pub fn run(args: &InitArgs) -> Result<()> {
-    let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let repo_root = repo::find_root().ok_or_else(|| {
+        anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
+    })?;
 
     let jj = Jj::new(repo_root.clone());
 
@@ -22,7 +23,9 @@ pub fn run(args: &InitArgs) -> Result<()> {
 
     if config.upstream.is_some() && config.origin.is_some() {
         if !args.force {
-            println!("jellycat upstream and origin are already configured. Use --force to reconfigure.");
+            println!(
+                "jellycat upstream and origin are already configured. Use --force to reconfigure."
+            );
             return Ok(());
         } else {
             println!("Reconfiguring jellycat due to --force flag.");

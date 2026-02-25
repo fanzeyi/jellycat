@@ -1,8 +1,8 @@
 use crate::jj::Jj;
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
-use anyhow::{anyhow, Result, Context};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct JjLogCommit {
@@ -12,6 +12,7 @@ pub struct JjLogCommit {
 
 pub fn find_root() -> Option<PathBuf> {
     let mut current_dir = env::current_dir().ok()?;
+    tracing::debug!("Searching for .jj root from {:?}", current_dir);
     loop {
         if current_dir.join(".jj").is_dir() {
             return Some(current_dir);
@@ -25,7 +26,7 @@ pub fn find_root() -> Option<PathBuf> {
 pub fn get_single_commit(repo_root: &Path, revset: &str) -> Result<JjLogCommit> {
     let jj = Jj::new(repo_root.to_path_buf());
     let output_str = jj.log(revset, "json(self)")?;
-    
+
     let lines: Vec<&str> = output_str.lines().collect();
     if lines.len() != 1 {
         return Err(anyhow!(

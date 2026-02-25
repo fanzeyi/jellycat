@@ -65,12 +65,14 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
 
     println!("Authenticated as GitHub user: {}", username);
 
-    let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let repo_root = repo::find_root().ok_or_else(|| {
+        anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
+    })?;
 
     let jj = Jj::new(repo_root);
 
-    let output_str = jj.log(&args.revset, "json(self)")
+    let output_str = jj
+        .log(&args.revset, "json(self)")
         .context("jj log failed")?;
 
     let bookmark_prefix = config
@@ -108,7 +110,10 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
         }
 
         let (bookmark_name, is_new_pr) = if let Some(pr_num) = pr_number {
-            println!("Found PR #{} for commit {}, looking up bookmark name", pr_num, commit.commit_id);
+            println!(
+                "Found PR #{} for commit {}, looking up bookmark name",
+                pr_num, commit.commit_id
+            );
             let pr_view_output = Command::new("gh")
                 .arg("pr")
                 .arg("view")
@@ -142,7 +147,10 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
                 "No PR found for commit {}, generating bookmark",
                 commit.commit_id
             );
-            (format!("{}{}", bookmark_prefix, &commit.change_id[..12]), true)
+            (
+                format!("{}{}", bookmark_prefix, &commit.change_id[..12]),
+                true,
+            )
         };
 
         println!(
@@ -169,7 +177,13 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
                 .arg("--head")
                 .arg(format!("{}:{}", username, bookmark_name))
                 .arg("--title")
-                .arg(commit.description.lines().next().unwrap_or("No description"))
+                .arg(
+                    commit
+                        .description
+                        .lines()
+                        .next()
+                        .unwrap_or("No description"),
+                )
                 .arg("--body")
                 .arg(&commit.description)
                 .output()
@@ -182,7 +196,9 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
                 ));
             }
 
-            let pr_url = String::from_utf8_lossy(&pr_create_output.stdout).trim().to_string();
+            let pr_url = String::from_utf8_lossy(&pr_create_output.stdout)
+                .trim()
+                .to_string();
             println!("Pull Request created: {}", pr_url);
 
             // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)

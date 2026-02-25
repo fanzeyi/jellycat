@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::path::Path;
 use crate::jj::Jj;
 use anyhow::Result;
+use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Default)]
 pub struct Config {

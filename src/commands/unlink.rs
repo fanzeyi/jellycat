@@ -1,6 +1,6 @@
-use crate::repo;
 use crate::jj::Jj;
-use anyhow::{anyhow, Result, Context};
+use crate::repo;
+use anyhow::{Context, Result, anyhow};
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -14,14 +14,15 @@ pub struct UnlinkArgs {
 }
 
 pub fn run(args: &UnlinkArgs) -> Result<()> {
-    let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let repo_root = repo::find_root().ok_or_else(|| {
+        anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
+    })?;
 
     let jj = Jj::new(repo_root.clone());
 
     // 1. Get the commit.
-    let commit = repo::get_single_commit(&repo_root, &args.revset)
-        .context("Failed to get commit")?;
+    let commit =
+        repo::get_single_commit(&repo_root, &args.revset).context("Failed to get commit")?;
 
     // 2. Filter out PR lines.
     let mut new_description_lines = Vec::new();

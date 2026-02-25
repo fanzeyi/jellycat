@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -17,10 +17,15 @@ impl Jj {
         cmd
     }
 
+    fn log_cmd(&self, cmd: &Command) {
+        tracing::debug!("Running jj: {:?}", cmd);
+    }
+
     pub fn config_list(&self) -> Result<String> {
-        let output = self.cmd()
-            .arg("config")
-            .arg("list")
+        let mut cmd = self.cmd();
+        cmd.arg("config").arg("list");
+        self.log_cmd(&cmd);
+        let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -35,12 +40,14 @@ impl Jj {
     }
 
     pub fn config_set(&self, key: &str, value: &str) -> Result<()> {
-        let status = self.cmd()
-            .arg("config")
+        let mut cmd = self.cmd();
+        cmd.arg("config")
             .arg("set")
             .arg("--repo")
             .arg(key)
-            .arg(value)
+            .arg(value);
+        self.log_cmd(&cmd);
+        let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -52,10 +59,10 @@ impl Jj {
     }
 
     pub fn git_remote_list(&self) -> Result<String> {
-        let output = self.cmd()
-            .arg("git")
-            .arg("remote")
-            .arg("list")
+        let mut cmd = self.cmd();
+        cmd.arg("git").arg("remote").arg("list");
+        self.log_cmd(&cmd);
+        let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -70,13 +77,15 @@ impl Jj {
     }
 
     pub fn log(&self, revset: &str, template: &str) -> Result<String> {
-        let output = self.cmd()
-            .arg("log")
+        let mut cmd = self.cmd();
+        cmd.arg("log")
             .arg("-r")
             .arg(revset)
             .arg("--no-graph")
             .arg("--template")
-            .arg(template)
+            .arg(template);
+        self.log_cmd(&cmd);
+        let output = cmd
             .output()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -91,12 +100,14 @@ impl Jj {
     }
 
     pub fn bookmark_set(&self, name: &str, revision: &str) -> Result<()> {
-        let status = self.cmd()
-            .arg("bookmark")
+        let mut cmd = self.cmd();
+        cmd.arg("bookmark")
             .arg("set")
             .arg(name)
             .arg("-r")
-            .arg(revision)
+            .arg(revision);
+        self.log_cmd(&cmd);
+        let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -108,12 +119,14 @@ impl Jj {
     }
 
     pub fn describe(&self, revset: &str, message: &str) -> Result<()> {
-        let status = self.cmd()
-            .arg("describe")
+        let mut cmd = self.cmd();
+        cmd.arg("describe")
             .arg("-r")
             .arg(revset)
             .arg("-m")
-            .arg(message)
+            .arg(message);
+        self.log_cmd(&cmd);
+        let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 
@@ -125,13 +138,15 @@ impl Jj {
     }
 
     pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
-        let status = self.cmd()
-            .arg("git")
+        let mut cmd = self.cmd();
+        cmd.arg("git")
             .arg("push")
             .arg("--remote")
             .arg(remote)
             .arg("--bookmark")
-            .arg(bookmark)
+            .arg(bookmark);
+        self.log_cmd(&cmd);
+        let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
 

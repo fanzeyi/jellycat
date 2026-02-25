@@ -1,14 +1,41 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::sync::Arc;
+
+pub trait CommandRunner {
+    fn run_output(&self, cmd: &mut Command) -> Result<Output>;
+    fn run_status(&self, cmd: &mut Command) -> Result<bool>;
+}
+
+pub struct DefaultRunner;
+
+impl CommandRunner for DefaultRunner {
+    fn run_output(&self, cmd: &mut Command) -> Result<Output> {
+        cmd.output().map_err(|e| anyhow!("Failed to execute command: {}", e))
+    }
+
+    fn run_status(&self, cmd: &mut Command) -> Result<bool> {
+        let status = cmd.status().map_err(|e| anyhow!("Failed to execute command: {}", e))?;
+        Ok(status.success())
+    }
+}
 
 pub struct Jj {
     repo_root: PathBuf,
+    runner: Arc<dyn CommandRunner + Send + Sync>,
 }
 
 impl Jj {
     pub fn new(repo_root: PathBuf) -> Self {
-        Self { repo_root }
+        Self {
+            repo_root,
+            runner: Arc::new(DefaultRunner),
+        }
+    }
+
+    pub fn with_runner(repo_root: PathBuf, runner: Arc<dyn CommandRunner + Send + Sync>) -> Self {
+        Self { repo_root, runner }
     }
 
     fn cmd(&self) -> Command {
@@ -25,9 +52,7 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("config").arg("list");
         self.log_cmd(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
+        let output = self.runner.run_output(&mut cmd)?;
 
         if !output.status.success() {
             return Err(anyhow!(
@@ -47,11 +72,7 @@ impl Jj {
             .arg(key)
             .arg(value);
         self.log_cmd(&cmd);
-        let status = cmd
-            .status()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
-
-        if !status.success() {
+        if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj config set failed"));
         }
 
@@ -62,9 +83,7 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("remote").arg("list");
         self.log_cmd(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
+        let output = self.runner.run_output(&mut cmd)?;
 
         if !output.status.success() {
             return Err(anyhow!(
@@ -85,9 +104,7 @@ impl Jj {
             .arg("--template")
             .arg(template);
         self.log_cmd(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
+        let output = self.runner.run_output(&mut cmd)?;
 
         if !output.status.success() {
             return Err(anyhow!(
@@ -109,9 +126,7 @@ impl Jj {
             .arg(template)
             .arg("--reversed");
         self.log_cmd(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow!("Failed to execute jj log: {}", e))?;
+        let output = self.runner.run_output(&mut cmd)?;
 
         if !output.status.success() {
             return Err(anyhow!(
@@ -131,11 +146,7 @@ impl Jj {
             .arg("-r")
             .arg(revision);
         self.log_cmd(&cmd);
-        let status = cmd
-            .status()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
-
-        if !status.success() {
+        if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj bookmark set failed"));
         }
 
@@ -150,11 +161,7 @@ impl Jj {
             .arg("-m")
             .arg(message);
         self.log_cmd(&cmd);
-        let status = cmd
-            .status()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
-
-        if !status.success() {
+        if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj describe failed"));
         }
 
@@ -162,7 +169,6 @@ impl Jj {
     }
 
     pub fn get_stack(&self, revision: &str) -> Result<Vec<String>> {
-        // Find all mutable ancestors and descendants.
         let revset = format!("(::{} | {}::) & mutable()", revision, revision);
         let mut cmd = self.cmd();
         cmd.arg("log")
@@ -173,9 +179,7 @@ impl Jj {
             .arg("json(self) ++ \"\\n\"")
             .arg("--reversed");
         self.log_cmd(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow!("Failed to execute jj log: {}", e))?;
+        let output = self.runner.run_output(&mut cmd)?;
 
         if !output.status.success() {
             return Err(anyhow!(
@@ -201,11 +205,7 @@ impl Jj {
             .arg("--bookmark")
             .arg(bookmark);
         self.log_cmd(&cmd);
-        let status = cmd
-            .status()
-            .map_err(|e| anyhow!("Failed to execute jj: {}", e))?;
-
-        if !status.success() {
+        if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj git push failed"));
         }
 

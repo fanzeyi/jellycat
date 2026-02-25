@@ -1,0 +1,151 @@
+use jellycat::commands::submit::{run_with_context, SubmitArgs, SubmitContext};
+use jellycat::config::Config;
+use jellycat::jj::CommandRunner;
+use std::collections::HashMap;
+use std::process::{Output, ExitStatus};
+use std::os::unix::process::ExitStatusExt;
+use std::sync::Arc;
+use anyhow::Result;
+use mockall::mock;
+use tempfile::tempdir;
+use std::fs;
+
+mock! {
+    pub MyRunner {}
+    impl CommandRunner for MyRunner {
+        fn run_output(&self, cmd: &mut std::process::Command) -> Result<Output>;
+        fn run_status(&self, cmd: &mut std::process::Command) -> Result<bool>;
+    }
+}
+
+#[test]
+fn test_submit_auth_failure() {
+    let mut mock_runner = MockMyRunner::new();
+
+    mock_runner.expect_run_output()
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: b"not logged in".to_vec(),
+        }));
+
+    let config = Config {
+        upstream: Some("owner/repo".to_string()),
+        origin: Some("origin".to_string()),
+        extra: HashMap::new(),
+    };
+
+    let ctx = SubmitContext {
+        config: &config,
+        runner: Arc::new(mock_runner),
+    };
+
+    let args = SubmitArgs {
+        revset: "@".to_string(),
+    };
+
+    let result = run_with_context(&args, &ctx);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("gh auth status failed"));
+}
+
+#[test]
+fn test_submit_success_new_pr() {
+    let mut mock_runner = MockMyRunner::new();
+    let temp_dir = tempdir().unwrap();
+    let jj_dir = temp_dir.path().join(".jj");
+    fs::create_dir(&jj_dir).unwrap();
+
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(temp_dir.path()).unwrap();
+
+    // 1. gh auth status
+    mock_runner.expect_run_output()
+        .withf(|cmd| cmd.get_args().any(|a| a == "status"))
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: br#"{"hosts":{"github.com":[{"login":"testuser","token":"testtoken"}]}}"#.to_vec(),
+            stderr: Vec::new(),
+        }));
+
+    // 2. jj log_reversed (main loop)
+    mock_runner.expect_run_output()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("log")) && args.contains(&std::ffi::OsStr::new("--reversed")) && args.contains(&std::ffi::OsStr::new("@"))
+        })
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: br#"{"commit_id":"commit1_full_id_here","change_id":"change1_full_id_here","description":"feat: first commit","parents":["parent1"]}"#.to_vec(),
+            stderr: Vec::new(),
+        }));
+
+    // 3. jj get_stack
+    mock_runner.expect_run_output()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("log")) && args.contains(&std::ffi::OsStr::new("(::commit1_full_id_here | commit1_full_id_here::) & mutable()"))
+        })
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: br#"{"commit_id":"commit1_full_id_here","change_id":"change1_full_id_here","description":"feat: first commit","parents":["parent1"]}"#.to_vec(),
+            stderr: Vec::new(),
+        }));
+
+    // 4. gh pr view (check if PR exists)
+    mock_runner.expect_run_output()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("pr")) && args.contains(&std::ffi::OsStr::new("view")) && !args.contains(&std::ffi::OsStr::new("--json"))
+        })
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }));
+
+    // 5. jj bookmark_set
+    mock_runner.expect_run_status()
+        .withf(|cmd| cmd.get_args().any(|a| a == "bookmark"))
+        .returning(|_| Ok(true));
+
+    // 6. jj git_push
+    mock_runner.expect_run_status()
+        .withf(|cmd| cmd.get_args().any(|a| a == "push"))
+        .returning(|_| Ok(true));
+
+    // 7. gh pr create
+    mock_runner.expect_run_output()
+        .withf(|cmd| cmd.get_args().any(|a| a == "create"))
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: b"https://github.com/owner/repo/pull/123".to_vec(),
+            stderr: Vec::new(),
+        }));
+
+    // 8. jj describe (link PR)
+    mock_runner.expect_run_status()
+        .withf(|cmd| cmd.get_args().any(|a| a == "describe"))
+        .returning(|_| Ok(true));
+
+    let config = Config {
+        upstream: Some("owner/repo".to_string()),
+        origin: Some("origin".to_string()),
+        extra: HashMap::new(),
+    };
+
+    let ctx = SubmitContext {
+        config: &config,
+        runner: Arc::new(mock_runner),
+    };
+
+    let args = SubmitArgs {
+        revset: "@".to_string(),
+    };
+
+    let result = run_with_context(&args, &ctx);
+    
+    std::env::set_current_dir(original_dir).unwrap();
+    
+    assert!(result.is_ok(), "Submit failed: {:?}", result.err());
+}

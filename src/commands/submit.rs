@@ -1,11 +1,12 @@
 use crate::config::Config;
-use crate::jj::Jj;
+use crate::jj::{CommandRunner, DefaultRunner, Jj};
 use crate::repo;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context as _, Result};
 use clap::Args;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct SubmitArgs {
@@ -40,46 +41,59 @@ struct StackPr {
     description: String,
 }
 
+pub struct SubmitContext<'a> {
+    pub config: &'a Config,
+    pub runner: Arc<dyn CommandRunner + Send + Sync>,
+}
+
 pub fn run(args: &SubmitArgs, config: &Config) -> Result<()> {
-    let auth = get_gh_auth()?;
+    let ctx = SubmitContext {
+        config,
+        runner: Arc::new(DefaultRunner),
+    };
+    run_with_context(args, &ctx)
+}
+
+pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
+    let auth = get_gh_auth(ctx.runner.as_ref())?;
     println!("Authenticated as GitHub user: {}", auth.login);
 
     let repo_root = repo::find_root()
         .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
-    let jj = Jj::new(repo_root);
-
+    
+    let jj = Jj::with_runner(repo_root, Arc::clone(&ctx.runner));
+    
     let output_str = jj
         .log_reversed(&args.revset, "json(self) ++ \"\\n\"")
         .context("jj log failed")?;
 
-    let bookmark_prefix = config
+    let bookmark_prefix = ctx.config
         .extra
         .get("jellycat.bookmark_prefix")
         .cloned()
         .unwrap_or_else(|| "jellycat/".to_string());
 
-    let upstream_repo = config
+    let upstream_repo = ctx.config
         .upstream
         .as_ref()
         .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
 
-    let origin_remote = config.origin.as_deref().unwrap_or("origin");
+    let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin");
 
     for line in output_str.lines().filter(|l| !l.is_empty()) {
         let commit: JjLogCommit = serde_json::from_str(line)
             .with_context(|| format!("Error parsing jj log JSON output. Line: {}", line))?;
 
-        submit_commit(&jj, &commit, config, &auth, &bookmark_prefix, upstream_repo, origin_remote)?;
+        submit_commit(&jj, &commit, ctx, &auth, &bookmark_prefix, upstream_repo, origin_remote)?;
     }
 
     Ok(())
 }
 
-fn get_gh_auth() -> Result<GhAuth> {
-    let output = Command::new("gh")
-        .args(["auth", "status", "--json", "hosts", "--show-token"])
-        .output()
-        .context("Failed to execute 'gh auth status'")?;
+fn get_gh_auth(runner: &dyn CommandRunner) -> Result<GhAuth> {
+    let mut cmd = Command::new("gh");
+    cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
+    let output = runner.run_output(&mut cmd).context("Failed to execute 'gh auth status'")?;
 
     if !output.status.success() {
         return Err(anyhow!(
@@ -185,7 +199,7 @@ fn generate_stack_graph(
 fn submit_commit(
     jj: &Jj,
     commit: &JjLogCommit,
-    _config: &Config,
+    ctx: &SubmitContext,
     auth: &GhAuth,
     bookmark_prefix: &str,
     upstream_repo: &str,
@@ -197,50 +211,35 @@ fn submit_commit(
     let pr_number = extract_pr_number(&commit.description);
 
     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
-        let output = Command::new("gh")
-            .args([
-                "pr",
-                "view",
-                &pr_num.to_string(),
-                "--repo",
-                upstream_repo,
-                "--json",
-                "headRefName",
-            ])
-            .output()?;
+        let mut cmd = Command::new("gh");
+        cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream_repo, "--json", "headRefName"]);
+        let output = ctx.runner.run_output(&mut cmd)?;
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        (
-            data["headRefName"]
-                .as_str()
-                .ok_or_else(|| anyhow!("No headRefName"))?
-                .to_string(),
-            false,
-        )
+        (data["headRefName"].as_str().ok_or_else(|| anyhow!("No headRefName"))?.to_string(), false)
     } else {
         (
-            format!("{}{}", bookmark_prefix, &commit.change_id[..12]),
+            format!(
+                "{}{}",
+                bookmark_prefix,
+                &commit.change_id[..12.min(commit.change_id.len())]
+            ),
             true,
         )
     };
 
-    println!(
-        "Setting bookmark '{}' for commit {}",
-        bookmark_name, commit.commit_id
-    );
+    println!("Setting bookmark '{}' for commit {}", bookmark_name, commit.commit_id);
     jj.bookmark_set(&bookmark_name, &commit.commit_id)?;
 
-    println!(
-        "Pushing bookmark '{}' to remote '{}'",
-        bookmark_name, origin_remote
-    );
+    println!("Pushing bookmark '{}' to remote '{}'", bookmark_name, origin_remote);
     jj.git_push(origin_remote, &bookmark_name)?;
 
     if is_new {
-        create_pr(jj, commit, auth, upstream_repo, &bookmark_name, &stack_graph)?;
+        create_pr(jj, commit, ctx, auth, upstream_repo, &bookmark_name, &stack_graph)?;
     } else {
         let nav_bar = nav_bar_from_graph(&stack_graph);
         update_pr(
             commit,
+            ctx,
             upstream_repo,
             pr_number.unwrap(),
             &stack_graph,
@@ -262,6 +261,7 @@ fn nav_bar_from_graph(graph: &str) -> Vec<String> {
 fn create_pr(
     jj: &Jj,
     commit: &JjLogCommit,
+    ctx: &SubmitContext,
     auth: &GhAuth,
     upstream: &str,
     bookmark: &str,
@@ -271,15 +271,15 @@ fn create_pr(
     let title = commit.description.lines().next().unwrap_or("No description");
     let body = format!("{}\n{}", body_prefix, commit.description);
     
-    let output = Command::new("gh")
-        .args([
+    let mut cmd = Command::new("gh");
+    cmd.args([
             "pr", "create", 
             "--repo", upstream, 
             "--head", &format!("{}:{}", auth.login, bookmark),
             "--title", title,
             "--body", &body
-        ])
-        .output()?;
+        ]);
+    let output = ctx.runner.run_output(&mut cmd)?;
 
     if !output.status.success() {
         return Err(anyhow!("gh pr create failed: {}", String::from_utf8_lossy(&output.stderr)));
@@ -300,6 +300,7 @@ fn create_pr(
 
 fn update_pr(
     commit: &JjLogCommit,
+    ctx: &SubmitContext,
     upstream: &str,
     pr_num: u32,
     stack_graph_base: &str,
@@ -308,9 +309,9 @@ fn update_pr(
 ) -> Result<()> {
     println!("Updating Pull Request #{} on GitHub...", pr_num);
     
-    let output = Command::new("gh")
-        .args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "body"])
-        .output()?;
+    let mut cmd = Command::new("gh");
+    cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "body"]);
+    let output = ctx.runner.run_output(&mut cmd)?;
     let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     let current_body = data["body"].as_str().unwrap_or("");
     
@@ -340,11 +341,9 @@ fn update_pr(
 
     let body = format!("{}\n{}", full_stack_md, user_content);
     
-    let status = Command::new("gh")
-        .args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", &body])
-        .status()?;
-
-    if !status.success() {
+    let mut cmd = Command::new("gh");
+    cmd.args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", &body]);
+    if !ctx.runner.run_status(&mut cmd)? {
         return Err(anyhow!("gh pr edit failed"));
     }
     Ok(())

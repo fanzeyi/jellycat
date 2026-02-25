@@ -99,6 +99,30 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    pub fn log_reversed(&self, revset: &str, template: &str) -> Result<String> {
+        let mut cmd = self.cmd();
+        cmd.arg("log")
+            .arg("-r")
+            .arg(revset)
+            .arg("--no-graph")
+            .arg("--template")
+            .arg(template)
+            .arg("--reversed");
+        self.log_cmd(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow!("Failed to execute jj log: {}", e))?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj log failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
     pub fn bookmark_set(&self, name: &str, revision: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("bookmark")
@@ -135,6 +159,37 @@ impl Jj {
         }
 
         Ok(())
+    }
+
+    pub fn get_stack(&self, revision: &str) -> Result<Vec<String>> {
+        // Find all mutable ancestors and descendants.
+        let revset = format!("(::{} | {}::) & mutable()", revision, revision);
+        let mut cmd = self.cmd();
+        cmd.arg("log")
+            .arg("-r")
+            .arg(&revset)
+            .arg("--no-graph")
+            .arg("--template")
+            .arg("json(self) ++ \"\\n\"")
+            .arg("--reversed");
+        self.log_cmd(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow!("Failed to execute jj log: {}", e))?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj log failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect())
     }
 
     pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {

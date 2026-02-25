@@ -20,6 +20,7 @@ struct JjLogCommit {
     commit_id: String,
     change_id: String,
     description: String,
+    parents: Vec<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -72,7 +73,7 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
     let jj = Jj::new(repo_root);
 
     let output_str = jj
-        .log(&args.revset, "json(self)")
+        .log_reversed(&args.revset, "json(self) ++ \"\\n\"")
         .context("jj log failed")?;
 
     let bookmark_prefix = config
@@ -99,6 +100,111 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
         let commit: JjLogCommit = serde_json::from_str(line)
             .with_context(|| format!("Error parsing jj log JSON output. Line: {}", line))?;
 
+        // 1. Get the stack for this commit.
+        let stack_commits_json = jj
+            .get_stack(&commit.commit_id)
+            .context("Failed to get stack")?;
+        let mut stack_commits: Vec<JjLogCommit> = Vec::new();
+        for s_line in stack_commits_json {
+            let s_commit: JjLogCommit = serde_json::from_str(&s_line)
+                .with_context(|| format!("Error parsing stack commit JSON: {}", s_line))?;
+            stack_commits.push(s_commit);
+        }
+
+        let mut prev_pr = None;
+        let mut next_pr = None;
+        let mut current_idx = None;
+
+        let mut stack_prs = Vec::new();
+        for sc in stack_commits.iter() {
+            let mut pr_num = None;
+            for desc_line in sc.description.lines() {
+                if let Some(pr_num_str) = desc_line.trim().strip_prefix("PR: #") {
+                    if let Ok(n) = pr_num_str.parse::<u32>() {
+                        pr_num = Some(n);
+                        break;
+                    }
+                }
+            }
+            stack_prs.push((sc.commit_id.clone(), pr_num, sc.description.clone()));
+        }
+
+        for (i, (cid, _, _)) in stack_prs.iter().enumerate() {
+            if cid == &commit.commit_id {
+                current_idx = Some(i);
+                break;
+            }
+        }
+
+        if let Some(idx) = current_idx {
+            if idx > 0 {
+                prev_pr = stack_prs[idx - 1].1;
+            }
+            if idx < stack_prs.len() - 1 {
+                next_pr = stack_prs[idx + 1].1;
+            }
+        }
+
+        let mut pr_review_link = String::new();
+        if let Some(idx) = current_idx {
+            let current_pr_num = stack_prs[idx].1;
+            let mut first_idx = idx;
+            // Group contiguous commits with the same PR number
+            if let Some(pr_num) = current_pr_num {
+                while first_idx > 0 && stack_prs[first_idx - 1].1 == Some(pr_num) {
+                    first_idx -= 1;
+                }
+            }
+
+            let first_commit = &&stack_commits[first_idx];
+            if let Some(base) = first_commit.parents.first() {
+                if first_idx == idx {
+                    // Single commit PR
+                    pr_review_link = format!("changes/{}", commit.commit_id);
+                } else {
+                    // Multi-commit PR
+                    pr_review_link = format!("changes/{}..{}", base, commit.commit_id);
+                }
+            }
+        }
+
+        let mut nav_bar = Vec::new();
+        if let Some(p) = prev_pr {
+            nav_bar.push(format!(
+                "[« Previous PR](https://github.com/{}/pull/{})",
+                upstream_repo, p
+            ));
+        }
+
+        if let Some(n) = next_pr {
+            nav_bar.push(format!(
+                "[Next PR »](https://github.com/{}/pull/{})",
+                upstream_repo, n
+            ));
+        }
+
+        let mut stack_graph_md = String::new();
+        if !nav_bar.is_empty() {
+            stack_graph_md.push_str(&nav_bar.join(" | "));
+            stack_graph_md.push_str("\n\n---\n\n");
+        }
+        stack_graph_md.push_str("<details>\n<summary><b>Stack</b></summary>\n\n");
+        for (cid, pnum, desc) in stack_prs.iter() {
+            let is_current = cid == &commit.commit_id;
+            let bullet = if is_current { "->" } else { "*" };
+            let title = desc.lines().next().unwrap_or("No description");
+
+            if is_current {
+                stack_graph_md.push_str(&format!("{} **(This PR)**: {}\n", bullet, title));
+            } else if let Some(n) = pnum {
+                stack_graph_md.push_str(&format!(
+                    "{} [PR #{}](https://github.com/{}/pull/{}): {}\n",
+                    bullet, n, upstream_repo, n, title
+                ));
+            }
+        }
+        stack_graph_md.push_str("\n</details>\n\n<!-- jellycat -->\n");
+
         let mut pr_number = None;
         for desc_line in commit.description.lines() {
             if let Some(pr_num_str) = desc_line.trim().strip_prefix("PR: #") {
@@ -110,6 +216,7 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
         }
 
         let (bookmark_name, is_new_pr) = if let Some(pr_num) = pr_number {
+            // ... (existing bookmark lookup logic)
             println!(
                 "Found PR #{} for commit {}, looking up bookmark name",
                 pr_num, commit.commit_id
@@ -169,6 +276,7 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
 
         if is_new_pr {
             println!("Creating Pull Request on GitHub...");
+            let pr_body = format!("{}\n{}", stack_graph_md, commit.description);
             let pr_create_output = Command::new("gh")
                 .arg("pr")
                 .arg("create")
@@ -185,7 +293,7 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
                         .unwrap_or("No description"),
                 )
                 .arg("--body")
-                .arg(&commit.description)
+                .arg(&pr_body)
                 .output()
                 .context("Failed to execute gh pr create")?;
 
@@ -202,21 +310,93 @@ pub fn run(args: &SubmitArgs, config: &Config) -> anyhow::Result<()> {
             println!("Pull Request created: {}", pr_url);
 
             // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
-            let pr_number = pr_url
+            let pr_num = pr_url
                 .split('/')
                 .last()
                 .and_then(|s| s.parse::<u32>().ok())
                 .ok_or_else(|| anyhow::anyhow!("Failed to parse PR number from URL: {}", pr_url))?;
 
-            println!("Linking PR #{} to commit {}", pr_number, commit.commit_id);
+            println!("Linking PR #{} to commit {}", pr_num, commit.commit_id);
             let mut new_description = commit.description.trim_end().to_string();
             if !new_description.is_empty() {
                 new_description.push_str("\n\n");
             }
-            new_description.push_str(&format!("PR: #{}", pr_number));
+            new_description.push_str(&format!("PR: #{}", pr_num));
 
             jj.describe(&commit.commit_id, &new_description)
                 .context("jj describe failed to update commit with PR link")?;
+        } else {
+            let pr_num = pr_number.unwrap();
+            println!("Updating Pull Request #{} on GitHub...", pr_num);
+
+            // Fetch current PR body to preserve user edits
+            let pr_view_body = Command::new("gh")
+                .arg("pr")
+                .arg("view")
+                .arg(pr_num.to_string())
+                .arg("--repo")
+                .arg(&upstream_repo)
+                .arg("--json")
+                .arg("body")
+                .output()
+                .context("Failed to fetch existing PR body")?;
+
+            let pr_body_data: serde_json::Value = serde_json::from_slice(&pr_view_body.stdout)
+                .context("Failed to parse PR body JSON")?;
+
+            let current_body = pr_body_data["body"].as_str().unwrap_or("");
+            let user_content = if let Some((_, rest)) = current_body.split_once("<!-- jellycat -->")
+            {
+                rest.trim()
+            } else {
+                commit.description.trim()
+            };
+
+            // Add "Review on GitHub" button if we have the PR number
+            let mut updated_nav = nav_bar.clone();
+            let review_link = format!(
+                "[Review Changes in This PR](https://github.com/{}/pull/{}/{})",
+                upstream_repo, pr_num, pr_review_link
+            );
+            if !updated_nav.is_empty() {
+                updated_nav.insert((updated_nav.len() + 1) / 2, review_link);
+            } else {
+                updated_nav.push(review_link);
+            }
+
+            let mut updated_stack_md = String::new();
+            updated_stack_md.push_str(&updated_nav.join(" | "));
+            updated_stack_md.push_str("\n\n---\n\n<details>\n<summary><b>Stack</b></summary>\n\n");
+            for (cid, pnum, _desc) in stack_prs.iter() {
+                let is_current = cid == &commit.commit_id;
+                let bullet = if is_current { "  *" } else { "*" };
+
+                if let Some(n) = pnum {
+                    if is_current {
+                        updated_stack_md.push_str(&format!("{} #{} **Current ↩︎**\n", bullet, n));
+                    } else {
+                        updated_stack_md.push_str(&format!("{} #{}\n", bullet, n));
+                    }
+                }
+            }
+            updated_stack_md.push_str("\n</details>\n\n<!-- jellycat -->\n");
+
+            let full_body = format!("{}\n{}", updated_stack_md, user_content);
+
+            let pr_edit_status = Command::new("gh")
+                .arg("pr")
+                .arg("edit")
+                .arg(pr_num.to_string())
+                .arg("--repo")
+                .arg(&upstream_repo)
+                .arg("--body")
+                .arg(&full_body)
+                .status()
+                .context("Failed to execute gh pr edit")?;
+
+            if !pr_edit_status.success() {
+                return Err(anyhow::anyhow!("gh pr edit failed"));
+            }
         }
     }
 

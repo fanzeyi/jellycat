@@ -60,6 +60,31 @@ impl Gh {
         tracing::debug!("Running gh: {:?}", cmd);
     }
 
+    /// Extracts a human-readable error message from a failed `gh api` response.
+    /// GitHub API errors return JSON in stdout: `{"message": "...", "errors": [...]}`.
+    /// Falls back to stderr if the body can't be parsed.
+    fn api_error(output: &std::process::Output) -> String {
+        if let Ok(data) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
+            let mut parts = Vec::new();
+            if let Some(msg) = data["message"].as_str() {
+                parts.push(msg.to_string());
+            }
+            if let Some(errors) = data["errors"].as_array() {
+                for e in errors {
+                    if let Some(msg) = e["message"].as_str() {
+                        parts.push(msg.to_string());
+                    } else if let Some(s) = e.as_str() {
+                        parts.push(s.to_string());
+                    }
+                }
+            }
+            if !parts.is_empty() {
+                return parts.join(": ");
+            }
+        }
+        String::from_utf8_lossy(&output.stderr).trim().to_string()
+    }
+
     pub fn auth_status(&self) -> Result<GhAuth> {
         let mut cmd = self.cmd();
         cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
@@ -123,7 +148,7 @@ impl Gh {
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
         if !output.status.success() {
-            return Err(anyhow!("Failed to get default branch for {}", upstream));
+            return Err(anyhow!("Failed to get default branch for {}: {}", upstream, Self::api_error(&output)));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -157,10 +182,7 @@ impl Gh {
             String::from_utf8_lossy(&output.stderr),
         );
         if !output.status.success() {
-            return Err(anyhow!(
-                "gh api create PR failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
+            return Err(anyhow!("Failed to create PR: {}", Self::api_error(&output)));
         }
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         let pr_num = data["number"]

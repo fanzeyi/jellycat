@@ -32,6 +32,7 @@ fn test_submit_auth_failure() {
     let config = Config {
         upstream: Some("owner/repo".to_string()),
         origin: Some("origin".to_string()),
+        head_repo: None,
         extra: HashMap::new(),
     };
 
@@ -113,19 +114,6 @@ fn test_submit_success_new_pr() {
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
 
-    // 5b. jj git remote list (for same-org fork detection)
-    mock_runner.expect_run_output()
-        .withf(|cmd| {
-            let args: Vec<_> = cmd.get_args().collect();
-            args.contains(&std::ffi::OsStr::new("remote")) && args.contains(&std::ffi::OsStr::new("list"))
-        })
-        .returning(|_| Ok(Output {
-            status: ExitStatus::from_raw(0),
-            // Different org from upstream "owner/repo", so no head_repo is added
-            stdout: b"origin\thttps://github.com/testuser/fork.git\n".to_vec(),
-            stderr: Vec::new(),
-        }));
-
     // 7. gh api create PR
     mock_runner.expect_run_output()
         .withf(|cmd| {
@@ -145,6 +133,7 @@ fn test_submit_success_new_pr() {
     let config = Config {
         upstream: Some("owner/repo".to_string()),
         origin: Some("origin".to_string()),
+        head_repo: None,
         extra: HashMap::new(),
     };
 

@@ -1,11 +1,10 @@
 use crate::config::Config;
+use crate::gh::{Gh, GhAuth};
 use crate::jj::{CommandRunner, DefaultRunner, Jj};
 use crate::repo;
 use anyhow::{anyhow, Context as _, Result};
 use clap::Args;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::process::Command;
 use std::sync::Arc;
 
 #[derive(Args, Debug)]
@@ -21,18 +20,6 @@ struct JjLogCommit {
     change_id: String,
     description: String,
     parents: Vec<String>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct GhAuth {
-    login: String,
-    #[allow(dead_code)]
-    token: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct GhAuthStatus {
-    hosts: HashMap<String, Vec<GhAuth>>,
 }
 
 struct StackPr {
@@ -55,14 +42,15 @@ pub fn run(args: &SubmitArgs, config: &Config) -> Result<()> {
 }
 
 pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
-    let auth = get_gh_auth(ctx.runner.as_ref())?;
+    let gh = Gh::new(Arc::clone(&ctx.runner));
+    let auth = gh.auth_status()?;
     println!("Authenticated as GitHub user: {}", auth.login);
 
     let repo_root = repo::find_root()
         .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
-    
+
     let jj = Jj::with_runner(repo_root, Arc::clone(&ctx.runner));
-    
+
     let output_str = jj
         .log_reversed(&args.revset, "json(self) ++ \"\\n\"")
         .context("jj log failed")?;
@@ -84,32 +72,10 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         let commit: JjLogCommit = serde_json::from_str(line)
             .with_context(|| format!("Error parsing jj log JSON output. Line: {}", line))?;
 
-        submit_commit(&jj, &commit, ctx, &auth, &bookmark_prefix, upstream_repo, origin_remote)?;
+        submit_commit(&jj, &gh, &commit, ctx, &auth, &bookmark_prefix, upstream_repo, origin_remote)?;
     }
 
     Ok(())
-}
-
-fn get_gh_auth(runner: &dyn CommandRunner) -> Result<GhAuth> {
-    let mut cmd = Command::new("gh");
-    cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
-    tracing::debug!("Running gh: {:?}", cmd);
-    let output = runner.run_output(&mut cmd).context("Failed to execute 'gh auth status'")?;
-    tracing::debug!("gh exited with status={}", output.status);
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "gh auth status failed. Make sure you are logged in: 'gh auth login'"
-        ));
-    }
-
-    let status: GhAuthStatus = serde_json::from_slice(&output.stdout)?;
-    status
-        .hosts
-        .get("github.com")
-        .and_then(|hosts| hosts.first())
-        .cloned()
-        .ok_or_else(|| anyhow!("No github.com authentication found. Run 'gh auth login'."))
 }
 
 fn extract_pr_number(description: &str) -> Option<u32> {
@@ -200,6 +166,7 @@ fn generate_stack_graph(
 
 fn submit_commit(
     jj: &Jj,
+    gh: &Gh,
     commit: &JjLogCommit,
     ctx: &SubmitContext,
     auth: &GhAuth,
@@ -213,13 +180,7 @@ fn submit_commit(
     let pr_number = extract_pr_number(&commit.description);
 
     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
-        let mut cmd = Command::new("gh");
-        cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream_repo, "--json", "headRefName"]);
-        tracing::debug!("Running gh: {:?}", cmd);
-        let output = ctx.runner.run_output(&mut cmd)?;
-        tracing::debug!("gh exited with status={}", output.status);
-        let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        (data["headRefName"].as_str().ok_or_else(|| anyhow!("No headRefName"))?.to_string(), false)
+        (gh.pr_view_head_ref(upstream_repo, pr_num)?, false)
     } else {
         (
             format!(
@@ -238,12 +199,12 @@ fn submit_commit(
     jj.git_push(origin_remote, &bookmark_name)?;
 
     if is_new {
-        create_pr(jj, commit, ctx, auth, upstream_repo, &bookmark_name, &stack_graph)?;
+        create_pr(jj, gh, commit, ctx, auth, upstream_repo, &bookmark_name, &stack_graph)?;
     } else {
         let nav_bar = nav_bar_from_graph(&stack_graph);
         update_pr(
+            gh,
             commit,
-            ctx,
             upstream_repo,
             pr_number.unwrap(),
             &stack_graph,
@@ -262,20 +223,9 @@ fn nav_bar_from_graph(graph: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn get_default_branch(runner: &dyn CommandRunner, upstream: &str) -> Result<String> {
-    let mut cmd = Command::new("gh");
-    cmd.args(["api", &format!("/repos/{}", upstream), "--jq", ".default_branch"]);
-    tracing::debug!("Running gh: {:?}", cmd);
-    let output = runner.run_output(&mut cmd)?;
-    tracing::debug!("gh exited with status={}", output.status);
-    if !output.status.success() {
-        return Err(anyhow!("Failed to get default branch for {}", upstream));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 fn create_pr(
     jj: &Jj,
+    gh: &Gh,
     commit: &JjLogCommit,
     ctx: &SubmitContext,
     auth: &GhAuth,
@@ -286,37 +236,20 @@ fn create_pr(
     println!("Creating Pull Request on GitHub...");
     let title = commit.description.lines().next().unwrap_or("No description");
     let body = format!("{}\n{}", body_prefix, commit.description);
-    let base = get_default_branch(ctx.runner.as_ref(), upstream)?;
+    let base = gh.default_branch(upstream)?;
     let head_owner = ctx.config.head_repo.as_deref()
         .and_then(|r| r.split('/').next())
         .unwrap_or(&auth.login);
     let head = format!("{}:{}", head_owner, bookmark);
 
-    let mut cmd = Command::new("gh");
-    cmd.args([
-        "api", "--method", "POST",
-        &format!("/repos/{}/pulls", upstream),
-        "-f", &format!("title={}", title),
-        "-f", &format!("body={}", body),
-        "-f", &format!("head={}", head),
-        "-f", &format!("base={}", base),
-    ]);
-    if let Some(repo) = &ctx.config.head_repo {
-        cmd.args(["-f", &format!("head_repo={}", repo)]);
-    }
-    tracing::debug!("Running gh: {:?}", cmd);
-    let output = ctx.runner.run_output(&mut cmd)?;
-    tracing::debug!("gh exited with status={} stderr={:?}", output.status, String::from_utf8_lossy(&output.stderr));
-
-    if !output.status.success() {
-        return Err(anyhow!("gh api create PR failed: {}", String::from_utf8_lossy(&output.stderr)));
-    }
-
-    let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let pr_num: u32 = data["number"].as_u64()
-        .ok_or_else(|| anyhow!("No PR number in response"))? as u32;
-    let url = data["html_url"].as_str()
-        .ok_or_else(|| anyhow!("No html_url in response"))?.to_string();
+    let (pr_num, url) = gh.create_pr(
+        upstream,
+        title,
+        &body,
+        &head,
+        &base,
+        ctx.config.head_repo.as_deref(),
+    )?;
 
     let mut new_desc = commit.description.trim_end().to_string();
     if !new_desc.is_empty() { new_desc.push_str("\n\n"); }
@@ -328,8 +261,8 @@ fn create_pr(
 }
 
 fn update_pr(
+    gh: &Gh,
     commit: &JjLogCommit,
-    ctx: &SubmitContext,
     upstream: &str,
     pr_num: u32,
     stack_graph_base: &str,
@@ -337,15 +270,8 @@ fn update_pr(
     nav_bar: &[String],
 ) -> Result<()> {
     println!("Updating Pull Request #{} on GitHub...", pr_num);
-    
-    let mut cmd = Command::new("gh");
-    cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "body"]);
-    tracing::debug!("Running gh: {:?}", cmd);
-    let output = ctx.runner.run_output(&mut cmd)?;
-    tracing::debug!("gh exited with status={}", output.status);
-    let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let current_body = data["body"].as_str().unwrap_or("");
-    
+
+    let current_body = gh.pr_view_body(upstream, pr_num)?;
     let user_content = current_body.split_once("<!-- jellycat -->")
         .map(|(_, rest)| rest.trim())
         .unwrap_or_else(|| commit.description.trim());
@@ -364,21 +290,12 @@ fn update_pr(
     let mut full_stack_md = String::new();
     full_stack_md.push_str(&final_nav.join(" | "));
     full_stack_md.push_str("\n\n");
-    // Extract the <details> block from stack_graph_base
     if let Some(details) = stack_graph_base.split_once("<details>") {
         full_stack_md.push_str("<details>");
         full_stack_md.push_str(details.1);
     }
 
     let body = format!("{}\n{}", full_stack_md, user_content);
-    
-    let mut cmd = Command::new("gh");
-    cmd.args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", &body]);
-    tracing::debug!("Running gh: {:?}", cmd);
-    let ok = ctx.runner.run_status(&mut cmd)?;
-    tracing::debug!("gh exited with success={}", ok);
-    if !ok {
-        return Err(anyhow!("gh pr edit failed"));
-    }
+    gh.pr_edit_body(upstream, pr_num, &body)?;
     Ok(())
 }

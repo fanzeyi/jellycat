@@ -93,7 +93,9 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
 fn get_gh_auth(runner: &dyn CommandRunner) -> Result<GhAuth> {
     let mut cmd = Command::new("gh");
     cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
+    tracing::debug!("Running gh: {:?}", cmd);
     let output = runner.run_output(&mut cmd).context("Failed to execute 'gh auth status'")?;
+    tracing::debug!("gh exited with status={}", output.status);
 
     if !output.status.success() {
         return Err(anyhow!(
@@ -213,7 +215,9 @@ fn submit_commit(
     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
         let mut cmd = Command::new("gh");
         cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream_repo, "--json", "headRefName"]);
+        tracing::debug!("Running gh: {:?}", cmd);
         let output = ctx.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         (data["headRefName"].as_str().ok_or_else(|| anyhow!("No headRefName"))?.to_string(), false)
     } else {
@@ -261,7 +265,9 @@ fn nav_bar_from_graph(graph: &str) -> Vec<String> {
 fn get_default_branch(runner: &dyn CommandRunner, upstream: &str) -> Result<String> {
     let mut cmd = Command::new("gh");
     cmd.args(["api", &format!("/repos/{}", upstream), "--jq", ".default_branch"]);
+    tracing::debug!("Running gh: {:?}", cmd);
     let output = runner.run_output(&mut cmd)?;
+    tracing::debug!("gh exited with status={}", output.status);
     if !output.status.success() {
         return Err(anyhow!("Failed to get default branch for {}", upstream));
     }
@@ -298,7 +304,9 @@ fn create_pr(
     if let Some(repo) = &ctx.config.head_repo {
         cmd.args(["-f", &format!("head_repo={}", repo)]);
     }
+    tracing::debug!("Running gh: {:?}", cmd);
     let output = ctx.runner.run_output(&mut cmd)?;
+    tracing::debug!("gh exited with status={} stderr={:?}", output.status, String::from_utf8_lossy(&output.stderr));
 
     if !output.status.success() {
         return Err(anyhow!("gh api create PR failed: {}", String::from_utf8_lossy(&output.stderr)));
@@ -332,7 +340,9 @@ fn update_pr(
     
     let mut cmd = Command::new("gh");
     cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "body"]);
+    tracing::debug!("Running gh: {:?}", cmd);
     let output = ctx.runner.run_output(&mut cmd)?;
+    tracing::debug!("gh exited with status={}", output.status);
     let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     let current_body = data["body"].as_str().unwrap_or("");
     
@@ -364,7 +374,10 @@ fn update_pr(
     
     let mut cmd = Command::new("gh");
     cmd.args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", &body]);
-    if !ctx.runner.run_status(&mut cmd)? {
+    tracing::debug!("Running gh: {:?}", cmd);
+    let ok = ctx.runner.run_status(&mut cmd)?;
+    tracing::debug!("gh exited with success={}", ok);
+    if !ok {
         return Err(anyhow!("gh pr edit failed"));
     }
     Ok(())

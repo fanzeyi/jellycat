@@ -258,6 +258,16 @@ fn nav_bar_from_graph(graph: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn get_default_branch(runner: &dyn CommandRunner, upstream: &str) -> Result<String> {
+    let mut cmd = Command::new("gh");
+    cmd.args(["api", &format!("/repos/{}", upstream), "--jq", ".default_branch"]);
+    let output = runner.run_output(&mut cmd)?;
+    if !output.status.success() {
+        return Err(anyhow!("Failed to get default branch for {}", upstream));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn create_pr(
     jj: &Jj,
     commit: &JjLogCommit,
@@ -270,24 +280,29 @@ fn create_pr(
     println!("Creating Pull Request on GitHub...");
     let title = commit.description.lines().next().unwrap_or("No description");
     let body = format!("{}\n{}", body_prefix, commit.description);
-    
+    let base = get_default_branch(ctx.runner.as_ref(), upstream)?;
+    let head = format!("{}:{}", auth.login, bookmark);
+
     let mut cmd = Command::new("gh");
     cmd.args([
-            "pr", "create", 
-            "--repo", upstream, 
-            "--head", &format!("{}:{}", auth.login, bookmark),
-            "--title", title,
-            "--body", &body
-        ]);
+        "api", "--method", "POST",
+        &format!("/repos/{}/pulls", upstream),
+        "-f", &format!("title={}", title),
+        "-f", &format!("body={}", body),
+        "-f", &format!("head={}", head),
+        "-f", &format!("base={}", base),
+    ]);
     let output = ctx.runner.run_output(&mut cmd)?;
 
     if !output.status.success() {
-        return Err(anyhow!("gh pr create failed: {}", String::from_utf8_lossy(&output.stderr)));
+        return Err(anyhow!("gh api create PR failed: {}", String::from_utf8_lossy(&output.stderr)));
     }
 
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let pr_num: u32 = url.split('/').last().and_then(|s| s.parse().ok())
-        .ok_or_else(|| anyhow!("Failed to parse PR number from URL: {}", url))?;
+    let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let pr_num: u32 = data["number"].as_u64()
+        .ok_or_else(|| anyhow!("No PR number in response"))? as u32;
+    let url = data["html_url"].as_str()
+        .ok_or_else(|| anyhow!("No html_url in response"))?.to_string();
 
     let mut new_desc = commit.description.trim_end().to_string();
     if !new_desc.is_empty() { new_desc.push_str("\n\n"); }

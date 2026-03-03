@@ -92,15 +92,14 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 4. gh pr view (check if PR exists)
+    // 4. gh api get default branch
     mock_runner.expect_run_output()
         .withf(|cmd| {
-            let args: Vec<_> = cmd.get_args().collect();
-            args.contains(&std::ffi::OsStr::new("pr")) && args.contains(&std::ffi::OsStr::new("view")) && !args.contains(&std::ffi::OsStr::new("--json"))
+            cmd.get_args().any(|a| a == "api") && cmd.get_args().any(|a| a == "--jq")
         })
         .returning(|_| Ok(Output {
-            status: ExitStatus::from_raw(1 << 8),
-            stdout: Vec::new(),
+            status: ExitStatus::from_raw(0),
+            stdout: b"main".to_vec(),
             stderr: Vec::new(),
         }));
 
@@ -114,12 +113,14 @@ fn test_submit_success_new_pr() {
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
 
-    // 7. gh pr create
+    // 7. gh api create PR
     mock_runner.expect_run_output()
-        .withf(|cmd| cmd.get_args().any(|a| a == "create"))
+        .withf(|cmd| {
+            cmd.get_args().any(|a| a == "api") && cmd.get_args().any(|a| a == "POST")
+        })
         .returning(|_| Ok(Output {
             status: ExitStatus::from_raw(0),
-            stdout: b"https://github.com/owner/repo/pull/123".to_vec(),
+            stdout: br#"{"number":123,"html_url":"https://github.com/owner/repo/pull/123"}"#.to_vec(),
             stderr: Vec::new(),
         }));
 

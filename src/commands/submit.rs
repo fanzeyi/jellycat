@@ -234,7 +234,7 @@ fn submit_commit(
     jj.git_push(origin_remote, &bookmark_name)?;
 
     if is_new {
-        create_pr(jj, commit, ctx, auth, upstream_repo, &bookmark_name, &stack_graph)?;
+        create_pr(jj, commit, ctx, auth, upstream_repo, &bookmark_name, &stack_graph, origin_remote)?;
     } else {
         let nav_bar = nav_bar_from_graph(&stack_graph);
         update_pr(
@@ -258,6 +258,39 @@ fn nav_bar_from_graph(graph: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn parse_github_repo(url: &str) -> Option<String> {
+    if let Some(rest) = url.strip_prefix("https://github.com/") {
+        let path = rest.trim_end_matches(".git");
+        if path.contains('/') { return Some(path.to_string()); }
+    }
+    if let Some(rest) = url.strip_prefix("git@github.com:") {
+        let path = rest.trim_end_matches(".git");
+        if path.contains('/') { return Some(path.to_string()); }
+    }
+    None
+}
+
+/// Returns the fork's `owner/repo` when it shares the same owner as `upstream`,
+/// indicating a same-org fork that requires `head_repo` in the PR API call.
+fn get_fork_repo(jj: &Jj, origin_remote: &str, upstream: &str) -> Result<Option<String>> {
+    let upstream_owner = upstream.split('/').next().unwrap_or("");
+    let remote_list = jj.git_remote_list()?;
+    for line in remote_list.lines() {
+        if let Some((name, url)) = line.split_once('\t').or_else(|| line.split_once(' ')) {
+            if name.trim() == origin_remote {
+                if let Some(nwo) = parse_github_repo(url.trim()) {
+                    let fork_owner = nwo.split('/').next().unwrap_or("");
+                    if fork_owner == upstream_owner {
+                        return Ok(Some(nwo));
+                    }
+                }
+                break;
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn get_default_branch(runner: &dyn CommandRunner, upstream: &str) -> Result<String> {
     let mut cmd = Command::new("gh");
     cmd.args(["api", &format!("/repos/{}", upstream), "--jq", ".default_branch"]);
@@ -276,12 +309,14 @@ fn create_pr(
     upstream: &str,
     bookmark: &str,
     body_prefix: &str,
+    origin_remote: &str,
 ) -> Result<()> {
     println!("Creating Pull Request on GitHub...");
     let title = commit.description.lines().next().unwrap_or("No description");
     let body = format!("{}\n{}", body_prefix, commit.description);
     let base = get_default_branch(ctx.runner.as_ref(), upstream)?;
     let head = format!("{}:{}", auth.login, bookmark);
+    let head_repo = get_fork_repo(jj, origin_remote, upstream)?;
 
     let mut cmd = Command::new("gh");
     cmd.args([
@@ -292,6 +327,9 @@ fn create_pr(
         "-f", &format!("head={}", head),
         "-f", &format!("base={}", base),
     ]);
+    if let Some(repo) = head_repo {
+        cmd.args(["-f", &format!("head_repo={}", repo)]);
+    }
     let output = ctx.runner.run_output(&mut cmd)?;
 
     if !output.status.success() {

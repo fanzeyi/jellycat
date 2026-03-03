@@ -275,11 +275,16 @@ fn parse_github_repo(url: &str) -> Option<String> {
 fn get_fork_repo(jj: &Jj, origin_remote: &str, upstream: &str) -> Result<Option<String>> {
     let upstream_owner = upstream.split('/').next().unwrap_or("");
     let remote_list = jj.git_remote_list()?;
+    println!("[debug] jj git remote list output: {:?}", remote_list);
     for line in remote_list.lines() {
         if let Some((name, url)) = line.split_once('\t').or_else(|| line.split_once(' ')) {
+            println!("[debug] remote: name={:?} url={:?}", name.trim(), url.trim());
             if name.trim() == origin_remote {
-                if let Some(nwo) = parse_github_repo(url.trim()) {
+                let nwo = parse_github_repo(url.trim());
+                println!("[debug] parsed fork repo from origin URL: {:?}", nwo);
+                if let Some(nwo) = nwo {
                     let fork_owner = nwo.split('/').next().unwrap_or("");
+                    println!("[debug] upstream_owner={:?} fork_owner={:?}", upstream_owner, fork_owner);
                     if fork_owner == upstream_owner {
                         return Ok(Some(nwo));
                     }
@@ -317,6 +322,7 @@ fn create_pr(
     let base = get_default_branch(ctx.runner.as_ref(), upstream)?;
     let head = format!("{}:{}", auth.login, bookmark);
     let head_repo = get_fork_repo(jj, origin_remote, upstream)?;
+    println!("[debug] head_repo={:?}", head_repo);
 
     let mut cmd = Command::new("gh");
     cmd.args([
@@ -328,9 +334,16 @@ fn create_pr(
         "-f", &format!("base={}", base),
     ]);
     if let Some(repo) = head_repo {
+        println!("[debug] adding head_repo={}", repo);
         cmd.args(["-f", &format!("head_repo={}", repo)]);
     }
+    println!("[debug] gh api call: {:?}", cmd);
     let output = ctx.runner.run_output(&mut cmd)?;
+    println!("[debug] gh api response status={} stdout={:?} stderr={:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
 
     if !output.status.success() {
         return Err(anyhow!("gh api create PR failed: {}", String::from_utf8_lossy(&output.stderr)));

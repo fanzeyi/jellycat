@@ -281,7 +281,10 @@ fn create_pr(
     let title = commit.description.lines().next().unwrap_or("No description");
     let body = format!("{}\n{}", body_prefix, commit.description);
     let base = get_default_branch(ctx.runner.as_ref(), upstream)?;
-    let head = format!("{}:{}", auth.login, bookmark);
+    let head_owner = ctx.config.head_repo.as_deref()
+        .and_then(|r| r.split('/').next())
+        .unwrap_or(&auth.login);
+    let head = format!("{}:{}", head_owner, bookmark);
 
     let mut cmd = Command::new("gh");
     cmd.args([

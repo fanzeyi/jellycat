@@ -363,6 +363,7 @@ fn submit_commit(
             auth,
             upstream_repo,
             &bookmark_name,
+            origin_remote,
             &graph.to_body_prefix(),
             progress,
         )?;
@@ -384,6 +385,7 @@ fn create_pr(
     auth: &GhAuth,
     upstream: &str,
     bookmark: &str,
+    origin_remote: &str,
     body_prefix: &str,
     progress: &Progress,
 ) -> Result<String> {
@@ -422,6 +424,9 @@ fn create_pr(
     }
     new_desc.push_str(&format!("PR: #{}", pr_num));
     jj.describe(&commit.commit_id, &new_desc)?;
+
+    progress.set_action("pushing updated description...");
+    jj.git_push(origin_remote, bookmark)?;
 
     Ok(url)
 }

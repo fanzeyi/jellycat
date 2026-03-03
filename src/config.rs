@@ -8,6 +8,7 @@ pub struct Config {
     pub upstream: Option<String>,
     pub origin: Option<String>,
     pub head_repo: Option<String>,
+    pub github_user: Option<String>,
     pub extra: HashMap<String, String>,
 }
 
@@ -35,6 +36,8 @@ pub fn load(repo_path: &Path) -> Result<Config> {
                     config.origin = Some(value.to_string());
                 } else if key == "jellycat.head_repo" {
                     config.head_repo = Some(value.to_string());
+                } else if key == "jellycat.github_user" {
+                    config.github_user = Some(value.to_string());
                 } else {
                     config.extra.insert(key.to_string(), value.to_string());
                 }

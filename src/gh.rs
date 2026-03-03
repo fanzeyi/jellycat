@@ -8,7 +8,6 @@ use std::sync::Arc;
 #[derive(Deserialize, Debug, Clone)]
 pub struct GhAuth {
     pub login: String,
-    #[allow(dead_code)]
     pub token: String,
 }
 
@@ -19,15 +18,42 @@ struct GhAuthStatus {
 
 pub struct Gh {
     runner: Arc<dyn CommandRunner + Send + Sync>,
+    token: Option<String>,
 }
 
 impl Gh {
     pub fn new(runner: Arc<dyn CommandRunner + Send + Sync>) -> Self {
-        Self { runner }
+        Self { runner, token: None }
+    }
+
+    pub fn with_token(runner: Arc<dyn CommandRunner + Send + Sync>, token: String) -> Self {
+        Self { runner, token: Some(token) }
+    }
+
+    /// Retrieves a token for `user` using the existing gh authentication.
+    /// Call this before constructing `Gh::with_token` for per-repo user support.
+    pub fn get_token(runner: &Arc<dyn CommandRunner + Send + Sync>, user: &str) -> Result<String> {
+        let mut cmd = Command::new("gh");
+        cmd.args(["auth", "token", "--user", user]);
+        tracing::debug!("Running gh: {:?}", cmd);
+        let output = runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+        if !output.status.success() {
+            return Err(anyhow!(
+                "gh auth token failed for user '{}': {}",
+                user,
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
     fn cmd(&self) -> Command {
-        Command::new("gh")
+        let mut cmd = Command::new("gh");
+        if let Some(token) = &self.token {
+            cmd.env("GH_TOKEN", token);
+        }
+        cmd
     }
 
     fn log_cmd(&self, cmd: &Command) {

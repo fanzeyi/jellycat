@@ -42,8 +42,16 @@ pub fn run(args: &SubmitArgs, config: &Config) -> Result<()> {
 }
 
 pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
-    let gh = Gh::new(Arc::clone(&ctx.runner));
-    let auth = gh.auth_status()?;
+    let (gh, auth) = if let Some(user) = &ctx.config.github_user {
+        let token = Gh::get_token(&ctx.runner, user)?;
+        let gh = Gh::with_token(Arc::clone(&ctx.runner), token.clone());
+        let auth = GhAuth { login: user.clone(), token };
+        (gh, auth)
+    } else {
+        let gh = Gh::new(Arc::clone(&ctx.runner));
+        let auth = gh.auth_status()?;
+        (gh, auth)
+    };
     println!("Authenticated as GitHub user: {}", auth.login);
 
     let repo_root = repo::find_root()

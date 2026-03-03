@@ -33,6 +33,7 @@ fn test_submit_auth_failure() {
         upstream: Some("owner/repo".to_string()),
         origin: Some("origin".to_string()),
         head_repo: None,
+        github_user: None,
         extra: HashMap::new(),
     };
 
@@ -134,6 +135,7 @@ fn test_submit_success_new_pr() {
         upstream: Some("owner/repo".to_string()),
         origin: Some("origin".to_string()),
         head_repo: None,
+        github_user: None,
         extra: HashMap::new(),
     };
 

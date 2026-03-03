@@ -66,7 +66,7 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
     let new_description = new_description_lines.join("\n");
 
     // 3. Update commit description.
-    jj.describe(&args.revset, &new_description)
+    jj.describe(&commit.change_id, &new_description)
         .context("jj describe failed")?;
 
     if let Some(pr_number) = args.pr_number {

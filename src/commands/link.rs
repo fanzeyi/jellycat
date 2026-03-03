@@ -66,7 +66,7 @@ pub fn run(args: &LinkArgs) -> Result<()> {
     new_description.push_str(&format!("PR: #{}", args.pr_number));
 
     // 4. Update commit description.
-    jj.describe(&args.revset, &new_description)
+    jj.describe(&commit.change_id, &new_description)
         .context("jj describe failed")?;
 
     println!(

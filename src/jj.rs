@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::Arc;
@@ -12,11 +12,14 @@ pub struct DefaultRunner;
 
 impl CommandRunner for DefaultRunner {
     fn run_output(&self, cmd: &mut Command) -> Result<Output> {
-        cmd.output().map_err(|e| anyhow!("Failed to execute command: {}", e))
+        cmd.output()
+            .map_err(|e| anyhow!("Failed to execute command: {}", e))
     }
 
     fn run_status(&self, cmd: &mut Command) -> Result<bool> {
-        let status = cmd.status().map_err(|e| anyhow!("Failed to execute command: {}", e))?;
+        let status = cmd
+            .status()
+            .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
         Ok(status.success())
     }
 }
@@ -153,11 +156,11 @@ impl Jj {
         Ok(())
     }
 
-    pub fn describe(&self, revset: &str, message: &str) -> Result<()> {
+    pub fn describe(&self, change_id: &str, message: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("describe")
             .arg("-r")
-            .arg(revset)
+            .arg(change_id)
             .arg("-m")
             .arg(message);
         self.log_cmd(&cmd);
@@ -200,7 +203,9 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("bookmark")
             .arg("track")
-            .arg(format!("{}@{}", name, remote));
+            .arg(name)
+            .arg("--remote")
+            .arg(remote);
         self.log_cmd(&cmd);
         if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj bookmark track failed"));

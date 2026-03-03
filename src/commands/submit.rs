@@ -203,6 +203,11 @@ fn submit_commit(
     println!("Setting bookmark '{}' for commit {}", bookmark_name, commit.commit_id);
     jj.bookmark_set(&bookmark_name, &commit.commit_id)?;
 
+    if is_new {
+        println!("Tracking bookmark '{}' on remote '{}'", bookmark_name, origin_remote);
+        jj.bookmark_track(&bookmark_name, origin_remote)?;
+    }
+
     println!("Pushing bookmark '{}' to remote '{}'", bookmark_name, origin_remote);
     jj.git_push(origin_remote, &bookmark_name)?;
 

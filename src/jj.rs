@@ -196,6 +196,19 @@ impl Jj {
             .collect())
     }
 
+    pub fn bookmark_track(&self, name: &str, remote: &str) -> Result<()> {
+        let mut cmd = self.cmd();
+        cmd.arg("bookmark")
+            .arg("track")
+            .arg(format!("{}@{}", name, remote));
+        self.log_cmd(&cmd);
+        if !self.runner.run_status(&mut cmd)? {
+            return Err(anyhow!("jj bookmark track failed"));
+        }
+
+        Ok(())
+    }
+
     pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("git")

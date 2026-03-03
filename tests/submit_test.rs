@@ -107,15 +107,26 @@ fn test_submit_success_new_pr() {
 
     // 5. jj bookmark_set
     mock_runner.expect_run_status()
-        .withf(|cmd| cmd.get_args().any(|a| a == "bookmark"))
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("set"))
+        })
         .returning(|_| Ok(true));
 
-    // 6. jj git_push
+    // 6. jj bookmark_track
+    mock_runner.expect_run_status()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("track"))
+        })
+        .returning(|_| Ok(true));
+
+    // 7. jj git_push
     mock_runner.expect_run_status()
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
 
-    // 7. gh api create PR
+    // 8. gh api create PR
     mock_runner.expect_run_output()
         .withf(|cmd| {
             cmd.get_args().any(|a| a == "api") && cmd.get_args().any(|a| a == "POST")
@@ -126,7 +137,7 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 8. jj describe (link PR)
+    // 9. jj describe (link PR)
     mock_runner.expect_run_status()
         .withf(|cmd| cmd.get_args().any(|a| a == "describe"))
         .returning(|_| Ok(true));

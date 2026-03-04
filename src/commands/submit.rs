@@ -352,7 +352,9 @@ fn submit_commit(
         style(&bookmark_name).dim(),
         origin_remote
     ));
-    jj.git_push(origin_remote, &bookmark_name)?;
+    jj.git_push(origin_remote, &bookmark_name, &mut |line| {
+        progress.pb.println(line)
+    })?;
 
     if is_new {
         let url = create_pr(
@@ -426,7 +428,7 @@ fn create_pr(
     jj.describe(&commit.commit_id, &new_desc)?;
 
     progress.set_action("pushing updated description...");
-    jj.git_push(origin_remote, bookmark)?;
+    jj.git_push(origin_remote, bookmark, &mut |line| progress.pb.println(line))?;
 
     Ok(url)
 }

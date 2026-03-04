@@ -106,22 +106,30 @@ fn test_submit_success_new_pr() {
         }));
 
     // 5. jj bookmark_set
-    mock_runner.expect_run_status()
+    mock_runner.expect_run_output()
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
             args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("set"))
         })
-        .returning(|_| Ok(true));
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }));
 
     // 6. jj bookmark_track
-    mock_runner.expect_run_status()
+    mock_runner.expect_run_output()
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
             args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("track"))
         })
-        .returning(|_| Ok(true));
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }));
 
-    // 7. jj git_push
+    // 7. jj git_push (called twice: initial push + after linking PR number)
     mock_runner.expect_run_status()
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
@@ -138,9 +146,13 @@ fn test_submit_success_new_pr() {
         }));
 
     // 9. jj describe (link PR)
-    mock_runner.expect_run_status()
+    mock_runner.expect_run_output()
         .withf(|cmd| cmd.get_args().any(|a| a == "describe"))
-        .returning(|_| Ok(true));
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }));
 
     let config = Config {
         upstream: Some("owner/repo".to_string()),

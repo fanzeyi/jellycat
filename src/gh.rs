@@ -133,10 +133,13 @@ impl Gh {
         let mut cmd = self.cmd();
         cmd.args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", body]);
         self.log_cmd(&cmd);
-        let ok = self.runner.run_status(&mut cmd)?;
-        tracing::debug!("gh exited with success={}", ok);
-        if !ok {
-            return Err(anyhow!("gh pr edit failed"));
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+        if !output.status.success() {
+            return Err(anyhow!(
+                "gh pr edit failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         Ok(())
     }

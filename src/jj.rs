@@ -1,11 +1,17 @@
 use anyhow::{Result, anyhow};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 
 pub trait CommandRunner {
     fn run_output(&self, cmd: &mut Command) -> Result<Output>;
     fn run_status(&self, cmd: &mut Command) -> Result<bool>;
+    /// Runs a command, calling `on_stderr` for each line written to stderr.
+    /// Defaults to `run_status` (ignoring lines), used by mocks in tests.
+    fn run_streaming(&self, cmd: &mut Command, _on_stderr: &mut dyn FnMut(&str)) -> Result<bool> {
+        self.run_status(cmd)
+    }
 }
 
 pub struct DefaultRunner;
@@ -20,6 +26,25 @@ impl CommandRunner for DefaultRunner {
         let status = cmd
             .status()
             .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
+        Ok(status.success())
+    }
+
+    fn run_streaming(&self, cmd: &mut Command, on_stderr: &mut dyn FnMut(&str)) -> Result<bool> {
+        cmd.stderr(Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
+        if let Some(stderr) = child.stderr.take() {
+            for line in BufReader::new(stderr).lines() {
+                match line {
+                    Ok(l) => on_stderr(&l),
+                    Err(_) => break,
+                }
+            }
+        }
+        let status = child
+            .wait()
+            .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
         Ok(status.success())
     }
 }
@@ -149,8 +174,12 @@ impl Jj {
             .arg("-r")
             .arg(revision);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj bookmark set failed"));
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj bookmark set failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
@@ -164,8 +193,12 @@ impl Jj {
             .arg("-m")
             .arg(message);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj describe failed"));
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj describe failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
@@ -207,14 +240,23 @@ impl Jj {
             .arg("--remote")
             .arg(remote);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj bookmark track failed"));
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj bookmark track failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())
     }
 
-    pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
+    pub fn git_push(
+        &self,
+        remote: &str,
+        bookmark: &str,
+        on_stderr: &mut dyn FnMut(&str),
+    ) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("git")
             .arg("push")
@@ -223,7 +265,7 @@ impl Jj {
             .arg("--bookmark")
             .arg(bookmark);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
+        if !self.runner.run_streaming(&mut cmd, on_stderr)? {
             return Err(anyhow!("jj git push failed"));
         }
 

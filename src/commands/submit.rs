@@ -7,6 +7,7 @@ use clap::Args;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +28,7 @@ struct JjLogCommit {
 
 struct StackCommit {
     commit_id: String,
+    change_id: String,
     parents: Vec<String>,
     description: String,
     pr_number: Option<u32>,
@@ -169,6 +171,14 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         })
         .collect::<Result<_>>()?;
 
+    // Track PR numbers for commits processed in this run, keyed by change_id.
+    // This avoids stale reads: after describing a commit (which rebases its
+    // descendants), get_stack on a later commit would see old descriptions.
+    let mut pr_map: HashMap<String, u32> = commits
+        .iter()
+        .filter_map(|c| extract_pr_number(&c.description).map(|n| (c.change_id.clone(), n)))
+        .collect();
+
     let total = commits.len();
     for (i, commit) in commits.iter().enumerate() {
         let title = commit
@@ -192,6 +202,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             upstream_repo,
             origin_remote,
             &progress,
+            &mut pr_map,
         ) {
             progress.finish_err(&e.to_string());
             return Err(e);
@@ -207,15 +218,22 @@ fn extract_pr_number(description: &str) -> Option<u32> {
         .find_map(|line| line.trim().strip_prefix("PR: #")?.parse().ok())
 }
 
-fn get_stack(jj: &Jj, commit_id: &str) -> Result<Vec<StackCommit>> {
-    jj.get_stack(commit_id)
+fn get_stack(jj: &Jj, commit: &JjLogCommit, pr_map: &HashMap<String, u32>) -> Result<Vec<StackCommit>> {
+    jj.get_stack(&commit.change_id)
         .context("Failed to get stack")?
         .iter()
         .map(|line| {
             let raw: JjLogCommit = serde_json::from_str(line)?;
+            // pr_map takes precedence: it reflects PRs created in this run that
+            // may not yet be in the commit description (stale after describe+rebase)
+            let pr_number = pr_map
+                .get(&raw.change_id)
+                .copied()
+                .or_else(|| extract_pr_number(&raw.description));
             Ok(StackCommit {
-                pr_number: extract_pr_number(&raw.description),
+                pr_number,
                 commit_id: raw.commit_id,
+                change_id: raw.change_id,
                 parents: raw.parents,
                 description: raw.description,
             })
@@ -225,10 +243,10 @@ fn get_stack(jj: &Jj, commit_id: &str) -> Result<Vec<StackCommit>> {
 
 fn generate_stack_graph(
     stack: &[StackCommit],
-    current_commit_id: &str,
+    current_change_id: &str,
     upstream_repo: &str,
 ) -> StackGraph {
-    let current_idx = stack.iter().position(|s| s.commit_id == current_commit_id);
+    let current_idx = stack.iter().position(|s| s.change_id == current_change_id);
 
     let (nav_items, review_suffix) = if let Some(idx) = current_idx {
         let prev_pr = if idx > 0 {
@@ -250,6 +268,8 @@ fn generate_stack_graph(
             }
         }
 
+        // Use the commit_id from the stack (reflects current state after rebases)
+        let current_commit_id = &stack[idx].commit_id;
         let review_suffix = stack[first_idx]
             .parents
             .first()
@@ -283,7 +303,7 @@ fn generate_stack_graph(
 
     let mut details_md = String::from("<details>\n<summary><b>Stack</b></summary>\n\n");
     for s in stack {
-        let is_current = s.commit_id == current_commit_id;
+        let is_current = s.change_id == current_change_id;
         let title = s.description.lines().next().unwrap_or("No description");
         if is_current {
             details_md.push_str(&format!("-> **(This PR)**: {}\n", title));
@@ -313,9 +333,10 @@ fn submit_commit(
     upstream_repo: &str,
     origin_remote: &str,
     progress: &Progress,
+    pr_map: &mut HashMap<String, u32>,
 ) -> Result<()> {
-    let stack = get_stack(jj, &commit.commit_id)?;
-    let graph = generate_stack_graph(&stack, &commit.commit_id, upstream_repo);
+    let stack = get_stack(jj, commit, pr_map)?;
+    let graph = generate_stack_graph(&stack, &commit.change_id, upstream_repo);
     let pr_number = extract_pr_number(&commit.description);
 
     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
@@ -357,7 +378,7 @@ fn submit_commit(
     })?;
 
     if is_new {
-        let url = create_pr(
+        let (pr_num, url) = create_pr(
             jj,
             gh,
             commit,
@@ -369,6 +390,7 @@ fn submit_commit(
             &graph.to_body_prefix(),
             progress,
         )?;
+        pr_map.insert(commit.change_id.clone(), pr_num);
         progress.finish_ok(&format!("PR created: {}", style(url).underlined()));
     } else {
         let pr_num = pr_number.unwrap();
@@ -390,7 +412,7 @@ fn create_pr(
     origin_remote: &str,
     body_prefix: &str,
     progress: &Progress,
-) -> Result<String> {
+) -> Result<(u32, String)> {
     let title = commit
         .description
         .lines()
@@ -435,7 +457,7 @@ fn create_pr(
         progress.pb.println(line)
     })?;
 
-    Ok(url)
+    Ok((pr_num, url))
 }
 
 fn update_pr(

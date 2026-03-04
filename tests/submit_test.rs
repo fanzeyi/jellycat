@@ -82,11 +82,11 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 3. jj get_stack
+    // 3. jj get_stack (now queries by change_id, not commit_id)
     mock_runner.expect_run_output()
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
-            args.contains(&std::ffi::OsStr::new("log")) && args.contains(&std::ffi::OsStr::new("(::commit1_full_id_here | commit1_full_id_here::) & mutable()"))
+            args.contains(&std::ffi::OsStr::new("log")) && args.contains(&std::ffi::OsStr::new("(::change1_full_id_here | change1_full_id_here::) & mutable()"))
         })
         .returning(|_| Ok(Output {
             status: ExitStatus::from_raw(0),
@@ -105,8 +105,10 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 5. jj bookmark_set
+    // 5. jj bookmark_set — called twice: once before push, once after describe
+    //    (the second call re-points the bookmark to the new commit to avoid divergence)
     mock_runner.expect_run_output()
+        .times(2)
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
             args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("set"))

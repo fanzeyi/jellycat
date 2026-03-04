@@ -49,7 +49,8 @@ impl Gh {
     }
 
     fn cmd(&self) -> Command {
-        let mut cmd = Command::new("gh");
+        let binary = std::env::var("JELLYCAT_GH_BINARY").unwrap_or_else(|_| "gh".to_string());
+        let mut cmd = Command::new(&binary);
         if let Some(token) = &self.token {
             cmd.env("GH_TOKEN", token);
         }

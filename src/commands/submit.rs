@@ -170,7 +170,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .collect::<Result<_>>()?;
 
     let total = commits.len();
-    for (i, commit) in commits.iter().rev().enumerate() {
+    for (i, commit) in commits.iter().enumerate() {
         let title = commit
             .description
             .lines()
@@ -336,7 +336,7 @@ fn submit_commit(
         "setting bookmark {}...",
         style(&bookmark_name).dim()
     ));
-    jj.bookmark_set(&bookmark_name, &commit.commit_id)?;
+    jj.bookmark_set(&bookmark_name, &commit.change_id)?;
 
     if is_new {
         progress.set_action(&format!(
@@ -425,10 +425,15 @@ fn create_pr(
         new_desc.push_str("\n\n");
     }
     new_desc.push_str(&format!("PR: #{}", pr_num));
-    jj.describe(&commit.commit_id, &new_desc)?;
+    jj.describe(&commit.change_id, &new_desc)?;
+
+    // describe creates a new commit hash; re-point the bookmark to the new commit
+    jj.bookmark_set(bookmark, &commit.change_id)?;
 
     progress.set_action("pushing updated description...");
-    jj.git_push(origin_remote, bookmark, &mut |line| progress.pb.println(line))?;
+    jj.git_push(origin_remote, bookmark, &mut |line| {
+        progress.pb.println(line)
+    })?;
 
     Ok(url)
 }

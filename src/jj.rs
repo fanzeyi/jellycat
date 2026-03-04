@@ -68,7 +68,7 @@ impl Jj {
 
     fn cmd(&self) -> Command {
         let mut cmd = Command::new("jj");
-        cmd.arg("-R").arg(&self.repo_root);
+        cmd.arg("-R").arg(&self.repo_root).arg("--ignore-working-copy");
         cmd
     }
 

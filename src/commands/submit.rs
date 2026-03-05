@@ -36,13 +36,14 @@ struct StackCommit {
     commit_id: String,
     change_id: String,
     parents: Vec<String>,
-    description: String,
     pr_number: Option<u32>,
 }
 
 struct StackGraph {
-    nav_items: Vec<String>,
-    details_md: String,
+    /// Numbered list section — empty when there is only one PR in the stack.
+    stack_md: String,
+    nav_prev: Option<String>,
+    nav_next: Option<String>,
     review_suffix: String,
 }
 
@@ -260,7 +261,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     let (pr_num, url) = gh.create_pr(
                         &upstream,
                         &title,
-                        &description,
+                        &commit_body(&description),
                         &head,
                         &base,
                         head_repo.as_deref(),
@@ -312,31 +313,32 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     let graph = generate_stack_graph(&stack, &change_id, &upstream);
 
                     let user_content = if is_new {
-                        description.trim().to_string()
+                        commit_body(&description)
                     } else {
                         let current_body = gh.pr_view_body(&upstream, pr_num)?;
                         current_body
                             .split_once("<!-- jellycat -->")
                             .map(|(_, rest)| rest.trim().to_string())
-                            .unwrap_or_else(|| description.trim().to_string())
+                            .unwrap_or_else(|| commit_body(&description))
                     };
 
                     let review_link = format!(
-                        "[Review Changes in This PR](https://github.com/{}/pull/{}/{})",
+                        "[Review changes](https://github.com/{}/pull/{}/{})",
                         upstream, pr_num, graph.review_suffix
                     );
-                    let mut final_nav = graph.nav_items.clone();
-                    if !final_nav.is_empty() {
-                        final_nav.insert((final_nav.len() + 1) / 2, review_link);
+                    // Nav: always « prev · review · next » with review in the middle.
+                    let mut nav = Vec::new();
+                    if let Some(prev) = graph.nav_prev { nav.push(prev); }
+                    nav.push(review_link);
+                    if let Some(next) = graph.nav_next { nav.push(next); }
+                    let nav_line = nav.join(" · ");
+
+                    let prefix = if graph.stack_md.is_empty() {
+                        nav_line
                     } else {
-                        final_nav.push(review_link);
-                    }
-                    let body = format!(
-                        "{}\n\n{}\n{}",
-                        final_nav.join(" | "),
-                        graph.details_md,
-                        user_content
-                    );
+                        format!("{}\n\n{}", nav_line, graph.stack_md)
+                    };
+                    let body = format!("{}\n\n<!-- jellycat -->\n\n{}", prefix, user_content);
 
                     gh.pr_edit_body(&upstream, pr_num, &body)?;
                     pb_clone.println(format!("  Updated body for PR #{}", pr_num));
@@ -428,6 +430,15 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     Ok(())
 }
 
+/// Returns the body of a commit description — everything after the first line (title).
+fn commit_body(description: &str) -> String {
+    let trimmed = description.trim();
+    match trimmed.find('\n') {
+        Some(pos) => trimmed[pos..].trim().to_string(),
+        None => String::new(),
+    }
+}
+
 fn extract_pr_number(description: &str) -> Option<u32> {
     description
         .lines()
@@ -453,7 +464,6 @@ fn get_stack(
                 commit_id: raw.commit_id,
                 change_id: raw.change_id,
                 parents: raw.parents,
-                description: raw.description,
             })
         })
         .collect()
@@ -464,78 +474,76 @@ fn generate_stack_graph(
     current_change_id: &str,
     upstream_repo: &str,
 ) -> StackGraph {
-    let current_idx = stack.iter().position(|s| s.change_id == current_change_id);
-
-    let (nav_items, review_suffix) = if let Some(idx) = current_idx {
-        let prev_pr = if idx > 0 {
-            stack[idx - 1].pr_number
-        } else {
-            None
+    let Some(idx) = stack.iter().position(|s| s.change_id == current_change_id) else {
+        return StackGraph {
+            stack_md: String::new(),
+            nav_prev: None,
+            nav_next: None,
+            review_suffix: String::new(),
         };
-        let next_pr = if idx < stack.len() - 1 {
-            stack[idx + 1].pr_number
-        } else {
-            None
-        };
-
-        let current_pr_num = stack[idx].pr_number;
-        let mut first_idx = idx;
-        if let Some(pr_num) = current_pr_num {
-            while first_idx > 0 && stack[first_idx - 1].pr_number == Some(pr_num) {
-                first_idx -= 1;
-            }
-        }
-
-        let current_commit_id = &stack[idx].commit_id;
-        let review_suffix = stack[first_idx]
-            .parents
-            .first()
-            .map(|base| {
-                if first_idx == idx {
-                    format!("changes/{}", current_commit_id)
-                } else {
-                    format!("changes/{}..{}", base, current_commit_id)
-                }
-            })
-            .unwrap_or_default();
-
-        let mut nav = Vec::new();
-        if let Some(p) = prev_pr {
-            nav.push(format!(
-                "[« Previous PR](https://github.com/{}/pull/{})",
-                upstream_repo, p
-            ));
-        }
-        if let Some(n) = next_pr {
-            nav.push(format!(
-                "[Next PR »](https://github.com/{}/pull/{})",
-                upstream_repo, n
-            ));
-        }
-
-        (nav, review_suffix)
-    } else {
-        (Vec::new(), String::new())
     };
 
-    let mut details_md = String::from("<details>\n<summary><b>Stack</b></summary>\n\n");
-    for s in stack {
-        let is_current = s.change_id == current_change_id;
-        let title = s.description.lines().next().unwrap_or("No description");
-        if is_current {
-            details_md.push_str(&format!("-> **(This PR)**: {}\n", title));
-        } else if let Some(n) = s.pr_number {
-            details_md.push_str(&format!(
-                "* [PR #{}](https://github.com/{}/pull/{}): {}\n",
-                n, upstream_repo, n, title
-            ));
+    // Adjacent PR numbers for prev/next navigation.
+    let prev_pr = if idx > 0 { stack[idx - 1].pr_number } else { None };
+    let next_pr = if idx < stack.len() - 1 { stack[idx + 1].pr_number } else { None };
+
+    // Review-diff suffix: single commit → changes/<sha>, multi-commit PR → changes/<base>..<head>.
+    let current_pr_num = stack[idx].pr_number;
+    let mut first_idx = idx;
+    if let Some(pr_num) = current_pr_num {
+        while first_idx > 0 && stack[first_idx - 1].pr_number == Some(pr_num) {
+            first_idx -= 1;
         }
     }
-    details_md.push_str("\n</details>\n\n<!-- jellycat -->\n");
+    let current_commit_id = &stack[idx].commit_id;
+    let review_suffix = stack[first_idx]
+        .parents
+        .first()
+        .map(|base| {
+            if first_idx == idx {
+                format!("changes/{}", current_commit_id)
+            } else {
+                format!("changes/{}..{}", base, current_commit_id)
+            }
+        })
+        .unwrap_or_default();
+
+    // Numbered list — only shown when there is more than one PR in the stack.
+    // Uses bare `#N` references so GitHub auto-expands them into rich PR links.
+    let pr_commits: Vec<&StackCommit> = stack.iter().filter(|s| s.pr_number.is_some()).collect();
+    let stack_md = if pr_commits.len() > 1 {
+        let current_pos = pr_commits
+            .iter()
+            .position(|s| s.change_id == current_change_id)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let mut items = Vec::new();
+        for (i, commit) in pr_commits.iter().enumerate() {
+            let pr_num = commit.pr_number.unwrap();
+            if commit.change_id == current_change_id {
+                items.push(format!("{}. **#{}** ← *this PR*", i + 1, pr_num));
+            } else {
+                items.push(format!("{}. #{}", i + 1, pr_num));
+            }
+        }
+        format!(
+            "<details>\n<summary><b>Stack ({} of {})</b></summary>\n\n{}\n\n</details>\n",
+            current_pos,
+            pr_commits.len(),
+            items.join("\n"),
+        )
+    } else {
+        String::new()
+    };
 
     StackGraph {
-        nav_items,
-        details_md,
+        stack_md,
+        nav_prev: prev_pr.map(|p| {
+            format!("[« PR #{}](https://github.com/{}/pull/{})", p, upstream_repo, p)
+        }),
+        nav_next: next_pr.map(|n| {
+            format!("[PR #{} »](https://github.com/{}/pull/{})", n, upstream_repo, n)
+        }),
         review_suffix,
     }
 }

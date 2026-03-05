@@ -175,19 +175,19 @@ fn test_stack_pr_navigation_for_new_prs() {
         .expect("PR 2 edit body not written — Phase 5 should call pr_edit_body for all commits");
 
     // PRs may be created in any order (parallel). Identify bottom vs top by navigation.
-    // Bottom commit (A): has "Next PR" link; top commit (B): has "Previous PR" link.
-    let (bottom_body, top_body) = if edit1.contains("Next PR »") {
+    // Bottom commit (A): has a "PR #N »" next link; top commit (B): has a "« PR #N" prev link.
+    let (bottom_body, top_body) = if edit1.contains(" »") {
         (&edit1, &edit2)
     } else {
         (&edit2, &edit1)
     };
 
     assert!(
-        bottom_body.contains("Next PR »"),
-        "Bottom commit (A) body must have a 'Next PR' navigation link\nbody:\n{bottom_body}"
+        bottom_body.contains(" »"),
+        "Bottom commit (A) body must have a next-PR navigation link (PR #N »)\nbody:\n{bottom_body}"
     );
     assert!(
-        top_body.contains("« Previous PR"),
-        "Top commit (B) body must have a '« Previous PR' navigation link back to A\nbody:\n{top_body}"
+        top_body.contains("« PR #"),
+        "Top commit (B) body must have a prev-PR navigation link (« PR #N)\nbody:\n{top_body}"
     );
 }

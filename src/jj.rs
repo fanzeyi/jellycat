@@ -271,4 +271,26 @@ impl Jj {
 
         Ok(())
     }
+
+    pub fn git_push_bookmarks(
+        &self,
+        remote: &str,
+        bookmarks: &[&str],
+        on_stderr: &mut dyn FnMut(&str),
+    ) -> Result<()> {
+        if bookmarks.is_empty() {
+            return Ok(());
+        }
+        let mut cmd = self.cmd();
+        cmd.arg("git").arg("push").arg("--remote").arg(remote);
+        for b in bookmarks {
+            cmd.arg("--bookmark").arg(b);
+        }
+        self.log_cmd(&cmd);
+        if !self.runner.run_streaming(&mut cmd, on_stderr)? {
+            return Err(anyhow!("jj git push failed"));
+        }
+
+        Ok(())
+    }
 }

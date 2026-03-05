@@ -131,12 +131,12 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 7. jj git_push (called twice: initial push + after linking PR number)
+    // 7. jj git push — Phase 3 (all bookmarks) + Phase 7 (new bookmarks after describe)
     mock_runner.expect_run_status()
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
 
-    // 8. gh api create PR
+    // 8. gh api create PR (Phase 4)
     mock_runner.expect_run_output()
         .withf(|cmd| {
             cmd.get_args().any(|a| a == "api") && cmd.get_args().any(|a| a == "POST")
@@ -147,7 +147,19 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 9. jj describe (link PR)
+    // 9. gh pr edit body (Phase 5 — updates all PR bodies with stack graph)
+    mock_runner.expect_run_output()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("pr")) && args.contains(&std::ffi::OsStr::new("edit"))
+        })
+        .returning(|_| Ok(Output {
+            status: ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }));
+
+    // 10. jj describe (Phase 6 — link PR number into commit description)
     mock_runner.expect_run_output()
         .withf(|cmd| cmd.get_args().any(|a| a == "describe"))
         .returning(|_| Ok(Output {

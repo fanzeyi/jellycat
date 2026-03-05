@@ -13,12 +13,12 @@ use tempfile::tempdir;
 /// Fake `gh` binary (Python 3, self-contained).
 ///
 /// State directory: $JELLYCAT_GH_STATE_DIR
-///   pr_count          — running PR counter
+///   pr_count          — running PR counter (protected by pr_count.lock)
 ///   pr_body_<N>       — body passed to the Nth create-PR call
 ///   pr_headref_<N>    — head ref for PR N
 ///   pr_body_edit_<N>  — body passed to a pr-edit call
 const FAKE_GH: &str = r#"#!/usr/bin/env python3
-import sys, os, json
+import sys, os, json, fcntl
 
 args = sys.argv[1:]
 state = os.environ.get('JELLYCAT_GH_STATE_DIR', '/tmp/gh_fake_state')
@@ -51,9 +51,13 @@ if cmd == 'api':
             else:
                 i += 1
 
+        # Use a lock file to make the counter update atomic across parallel processes.
         count_file = os.path.join(state, 'pr_count')
-        pr_num = int(open(count_file).read().strip()) + 1 if os.path.exists(count_file) else 1
-        open(count_file, 'w').write(str(pr_num))
+        lock_file = os.path.join(state, 'pr_count.lock')
+        with open(lock_file, 'w') as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            pr_num = int(open(count_file).read().strip()) + 1 if os.path.exists(count_file) else 1
+            open(count_file, 'w').write(str(pr_num))
 
         open(os.path.join(state, f'pr_body_{pr_num}'), 'w').write(body)
         headref = head.split(':', 1)[-1] if ':' in head else head
@@ -163,19 +167,27 @@ fn test_stack_pr_navigation_for_new_prs() {
         .assert()
         .success();
 
-    // PR 1 = commit A (submitted first; B has no PR yet at that point)
-    let pr1_body = fs::read_to_string(state_dir.join("pr_body_1"))
-        .expect("PR 1 body file not written");
-    // PR 2 = commit B (submitted second; pr_map must carry PR #1 from A)
-    let pr2_body = fs::read_to_string(state_dir.join("pr_body_2"))
-        .expect("PR 2 body file not written — navigation bug may still be present");
+    // Phase 4 creates PRs with plain descriptions; Phase 5 updates all PR bodies
+    // with the stack graph + navigation via `gh pr edit`. Check the edit bodies.
+    let edit1 = fs::read_to_string(state_dir.join("pr_body_edit_1"))
+        .expect("PR 1 edit body not written — Phase 5 should call pr_edit_body for all commits");
+    let edit2 = fs::read_to_string(state_dir.join("pr_body_edit_2"))
+        .expect("PR 2 edit body not written — Phase 5 should call pr_edit_body for all commits");
+
+    // PRs may be created in any order (parallel). Identify bottom vs top by navigation.
+    // Bottom commit (A): has "Next PR" link; top commit (B): has "Previous PR" link.
+    let (bottom_body, top_body) = if edit1.contains("Next PR »") {
+        (&edit1, &edit2)
+    } else {
+        (&edit2, &edit1)
+    };
 
     assert!(
-        !pr1_body.contains("Next PR"),
-        "PR 1 should have no next-PR link (B not yet submitted at that point)\nbody:\n{pr1_body}"
+        bottom_body.contains("Next PR »"),
+        "Bottom commit (A) body must have a 'Next PR' navigation link\nbody:\n{bottom_body}"
     );
     assert!(
-        pr2_body.contains("Previous PR") && pr2_body.contains("/pull/1"),
-        "PR 2 body must contain a navigation link back to PR #1\nbody:\n{pr2_body}"
+        top_body.contains("« Previous PR"),
+        "Top commit (B) body must have a '« Previous PR' navigation link back to A\nbody:\n{top_body}"
     );
 }

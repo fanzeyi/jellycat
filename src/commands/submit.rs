@@ -26,6 +26,12 @@ struct JjLogCommit {
     parents: Vec<String>,
 }
 
+struct PreparedCommit {
+    commit: JjLogCommit,
+    bookmark_name: String,
+    is_new: bool,
+}
+
 struct StackCommit {
     commit_id: String,
     change_id: String,
@@ -38,50 +44,6 @@ struct StackGraph {
     nav_items: Vec<String>,
     details_md: String,
     review_suffix: String,
-}
-
-impl StackGraph {
-    fn to_body_prefix(&self) -> String {
-        let mut md = String::new();
-        if !self.nav_items.is_empty() {
-            md.push_str(&self.nav_items.join(" | "));
-            md.push_str("\n\n---\n\n");
-        }
-        md.push_str(&self.details_md);
-        md
-    }
-}
-
-/// Wraps a spinner and formats consistent step messages for a single commit submission.
-struct Progress<'a> {
-    pb: &'a ProgressBar,
-    prefix: String,
-}
-
-impl<'a> Progress<'a> {
-    fn new(pb: &'a ProgressBar, step: usize, total: usize, title: &str) -> Self {
-        Self {
-            pb,
-            prefix: format!("[{}/{}] {}", step, total, style(title).bold()),
-        }
-    }
-
-    fn set_action(&self, action: &str) {
-        self.pb
-            .set_message(format!("{} — {}", self.prefix, style(action).dim()));
-    }
-
-    fn finish_ok(&self, result: &str) {
-        self.pb.set_style(success_spinner_style());
-        self.pb
-            .finish_with_message(format!("{} — {}", self.prefix, style(result).green()));
-    }
-
-    fn finish_err(&self, err: &str) {
-        self.pb.set_style(error_spinner_style());
-        self.pb
-            .finish_with_message(format!("{} — {}", self.prefix, style(err).red()));
-    }
 }
 
 fn running_spinner_style() -> ProgressStyle {
@@ -98,11 +60,11 @@ fn success_spinner_style() -> ProgressStyle {
         .unwrap()
 }
 
-fn error_spinner_style() -> ProgressStyle {
-    ProgressStyle::default_spinner()
-        .tick_strings(&["✗"])
-        .template("{spinner:.red} {msg}")
-        .unwrap()
+fn new_spinner() -> ProgressBar {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(running_spinner_style());
+    pb.enable_steady_tick(Duration::from_millis(80));
+    pb
 }
 
 pub struct SubmitContext<'a> {
@@ -141,7 +103,8 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     let repo_root = repo::find_root()
         .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
-    let jj = Jj::with_runner(repo_root, Arc::clone(&ctx.runner));
+    let jj = Arc::new(Jj::with_runner(repo_root, Arc::clone(&ctx.runner)));
+    let gh = Arc::new(gh);
 
     let output_str = jj
         .log_reversed(&args.revset, "json(self) ++ \"\\n\"")
@@ -158,9 +121,10 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .config
         .upstream
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
+        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))
+        .map(|s| s.clone())?;
 
-    let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin");
+    let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin").to_string();
 
     let commits: Vec<JjLogCommit> = output_str
         .lines()
@@ -171,42 +135,294 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         })
         .collect::<Result<_>>()?;
 
-    // Track PR numbers for commits processed in this run, keyed by change_id.
-    // This avoids stale reads: after describing a commit (which rebases its
-    // descendants), get_stack on a later commit would see old descriptions.
+    if commits.is_empty() {
+        return Ok(());
+    }
+
+    // Track PR numbers for commits, keyed by change_id.
     let mut pr_map: HashMap<String, u32> = commits
         .iter()
         .filter_map(|c| extract_pr_number(&c.description).map(|n| (c.change_id.clone(), n)))
         .collect();
 
     let total = commits.len();
-    for (i, commit) in commits.iter().enumerate() {
-        let title = commit
+
+    // Phase 1: Gather bookmark names (parallel I/O).
+    // New commits compute a name locally; existing ones fetch the branch name from GitHub.
+    let pb = new_spinner();
+    pb.set_message(format!("Gathering PR info for {} commit(s)...", total));
+    let prepared: Vec<PreparedCommit> = {
+        let handles: Vec<_> = commits
+            .into_iter()
+            .map(|commit| {
+                let gh = Arc::clone(&gh);
+                let upstream = upstream_repo.clone();
+                let prefix = bookmark_prefix.clone();
+                let pr_number = extract_pr_number(&commit.description);
+                std::thread::spawn(move || -> Result<PreparedCommit> {
+                    let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
+                        (gh.pr_view_head_ref(&upstream, pr_num)?, false)
+                    } else {
+                        let name = format!(
+                            "{}{}",
+                            prefix,
+                            &commit.change_id[..12.min(commit.change_id.len())]
+                        );
+                        (name, true)
+                    };
+                    Ok(PreparedCommit {
+                        commit,
+                        bookmark_name,
+                        is_new,
+                    })
+                })
+            })
+            .collect();
+
+        let mut results = Vec::with_capacity(handles.len());
+        let mut errors: Vec<anyhow::Error> = Vec::new();
+        for handle in handles {
+            match handle.join().expect("thread panicked") {
+                Ok(p) => results.push(p),
+                Err(e) => errors.push(e),
+            }
+        }
+        if let Some(e) = errors.into_iter().next() {
+            pb.finish_and_clear();
+            return Err(e);
+        }
+        results
+    };
+    pb.finish_and_clear();
+
+    // Phase 2: Setup bookmarks (sequential, local).
+    let pb = new_spinner();
+    pb.set_message("Setting up bookmarks...");
+    for p in &prepared {
+        jj.bookmark_set(&p.bookmark_name, &p.commit.change_id)?;
+        if p.is_new {
+            jj.bookmark_track(&p.bookmark_name, &origin_remote)?;
+        }
+    }
+    pb.set_style(success_spinner_style());
+    pb.finish_with_message("Bookmarks set up");
+
+    // Phase 3: Batch push #1 — all bookmarks in one network operation.
+    let pb = new_spinner();
+    pb.set_message(format!(
+        "Pushing {} bookmark(s) to {}...",
+        total, origin_remote
+    ));
+    let all_names: Vec<&str> = prepared.iter().map(|p| p.bookmark_name.as_str()).collect();
+    {
+        let pb_clone = pb.clone();
+        jj.git_push_bookmarks(&origin_remote, &all_names, &mut |line| {
+            pb_clone.println(line)
+        })?;
+    }
+    pb.set_style(success_spinner_style());
+    pb.finish_with_message(format!("Pushed {} bookmark(s)", total));
+
+    // Phase 4: Create new PRs (parallel GitHub API).
+    let new_count = prepared.iter().filter(|p| p.is_new).count();
+    if new_count > 0 {
+        let pb = new_spinner();
+        pb.set_message(format!("Creating {} new PR(s)...", new_count));
+
+        let default_branch = gh.default_branch(&upstream_repo)?;
+        let head_owner = ctx
+            .config
+            .head_repo
+            .as_deref()
+            .and_then(|r| r.split('/').next())
+            .unwrap_or(&auth.login)
+            .to_string();
+
+        let handles: Vec<_> = prepared
+            .iter()
+            .filter(|p| p.is_new)
+            .map(|p| {
+                let gh = Arc::clone(&gh);
+                let upstream = upstream_repo.clone();
+                let bookmark_name = p.bookmark_name.clone();
+                let change_id = p.commit.change_id.clone();
+                let description = p.commit.description.clone();
+                let head = format!("{}:{}", head_owner, &bookmark_name);
+                let base = default_branch.clone();
+                let head_repo = ctx.config.head_repo.clone();
+                let title = description
+                    .lines()
+                    .next()
+                    .unwrap_or("No description")
+                    .to_string();
+                let pb_clone = pb.clone();
+                std::thread::spawn(move || -> Result<(String, u32, String)> {
+                    let (pr_num, url) = gh.create_pr(
+                        &upstream,
+                        &title,
+                        &description,
+                        &head,
+                        &base,
+                        head_repo.as_deref(),
+                    )?;
+                    pb_clone.println(format!("  PR #{} created: {}", pr_num, url));
+                    Ok((change_id, pr_num, url))
+                })
+            })
+            .collect();
+
+        let mut errors: Vec<anyhow::Error> = Vec::new();
+        for handle in handles {
+            match handle.join().expect("thread panicked") {
+                Ok((change_id, pr_num, _)) => {
+                    pr_map.insert(change_id, pr_num);
+                }
+                Err(e) => errors.push(e),
+            }
+        }
+        if let Some(e) = errors.into_iter().next() {
+            pb.finish_and_clear();
+            return Err(e);
+        }
+        pb.set_style(success_spinner_style());
+        pb.finish_with_message(format!("Created {} new PR(s)", new_count));
+    }
+
+    // Phase 5: Update all PR bodies (parallel GitHub API).
+    // pr_map is now complete — existing + newly created.
+    let pb = new_spinner();
+    pb.set_message(format!("Updating {} PR body(ies)...", total));
+    {
+        let handles: Vec<_> = prepared
+            .iter()
+            .map(|p| {
+                let jj = Arc::clone(&jj);
+                let gh = Arc::clone(&gh);
+                let pr_map = pr_map.clone();
+                let change_id = p.commit.change_id.clone();
+                let description = p.commit.description.clone();
+                let upstream = upstream_repo.clone();
+                let is_new = p.is_new;
+                let pb_clone = pb.clone();
+                std::thread::spawn(move || -> Result<()> {
+                    let pr_num = *pr_map.get(&change_id).ok_or_else(|| {
+                        anyhow!("No PR number for commit {}", &change_id[..12.min(change_id.len())])
+                    })?;
+                    let stack = get_stack(&jj, &change_id, &pr_map)?;
+                    let graph = generate_stack_graph(&stack, &change_id, &upstream);
+
+                    let user_content = if is_new {
+                        description.trim().to_string()
+                    } else {
+                        let current_body = gh.pr_view_body(&upstream, pr_num)?;
+                        current_body
+                            .split_once("<!-- jellycat -->")
+                            .map(|(_, rest)| rest.trim().to_string())
+                            .unwrap_or_else(|| description.trim().to_string())
+                    };
+
+                    let review_link = format!(
+                        "[Review Changes in This PR](https://github.com/{}/pull/{}/{})",
+                        upstream, pr_num, graph.review_suffix
+                    );
+                    let mut final_nav = graph.nav_items.clone();
+                    if !final_nav.is_empty() {
+                        final_nav.insert((final_nav.len() + 1) / 2, review_link);
+                    } else {
+                        final_nav.push(review_link);
+                    }
+                    let body = format!(
+                        "{}\n\n{}\n{}",
+                        final_nav.join(" | "),
+                        graph.details_md,
+                        user_content
+                    );
+
+                    gh.pr_edit_body(&upstream, pr_num, &body)?;
+                    pb_clone.println(format!("  Updated body for PR #{}", pr_num));
+                    Ok(())
+                })
+            })
+            .collect();
+
+        let mut errors: Vec<anyhow::Error> = Vec::new();
+        for handle in handles {
+            if let Err(e) = handle.join().expect("thread panicked") {
+                errors.push(e);
+            }
+        }
+        if let Some(e) = errors.into_iter().next() {
+            pb.finish_and_clear();
+            return Err(e);
+        }
+    }
+    pb.set_style(success_spinner_style());
+    pb.finish_with_message(format!("Updated {} PR body(ies)", total));
+
+    // Phases 6 & 7 only apply to commits that received new PRs.
+    let has_new = prepared.iter().any(|p| p.is_new);
+    if has_new {
+        // Phase 6: Describe new commits (sequential, bottom-to-top).
+        // Each describe rebases descendants, so order matters.
+        let pb = new_spinner();
+        pb.set_message("Updating commit descriptions with PR numbers...");
+        for p in prepared.iter().filter(|p| p.is_new) {
+            let pr_num = pr_map[&p.commit.change_id];
+            let mut new_desc = p.commit.description.trim_end().to_string();
+            if !new_desc.is_empty() {
+                new_desc.push_str("\n\n");
+            }
+            new_desc.push_str(&format!("PR: #{}", pr_num));
+            jj.describe(&p.commit.change_id, &new_desc)?;
+        }
+        pb.set_style(success_spinner_style());
+        pb.finish_with_message("Commit descriptions updated");
+
+        // Phase 7: Re-point bookmarks + batch push #2.
+        // describe creates new commit hashes; re-point bookmarks before pushing.
+        let new_commits: Vec<&PreparedCommit> =
+            prepared.iter().filter(|p| p.is_new).collect();
+        for p in &new_commits {
+            jj.bookmark_set(&p.bookmark_name, &p.commit.change_id)?;
+        }
+        let new_names: Vec<&str> = new_commits
+            .iter()
+            .map(|p| p.bookmark_name.as_str())
+            .collect();
+        let pb = new_spinner();
+        pb.set_message(format!(
+            "Pushing {} updated bookmark(s)...",
+            new_names.len()
+        ));
+        {
+            let pb_clone = pb.clone();
+            jj.git_push_bookmarks(&origin_remote, &new_names, &mut |line| {
+                pb_clone.println(line)
+            })?;
+        }
+        pb.set_style(success_spinner_style());
+        pb.finish_with_message(format!("Pushed {} updated bookmark(s)", new_names.len()));
+    }
+
+    // Summary
+    for p in &prepared {
+        let pr_num = pr_map[&p.commit.change_id];
+        let title = p
+            .commit
             .description
             .lines()
             .next()
             .unwrap_or("(no description)");
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(running_spinner_style());
-        pb.enable_steady_tick(Duration::from_millis(80));
-        let progress = Progress::new(&pb, i + 1, total, title);
-        progress.set_action("starting...");
-
-        if let Err(e) = submit_commit(
-            &jj,
-            &gh,
-            commit,
-            ctx,
-            &auth,
-            &bookmark_prefix,
-            upstream_repo,
-            origin_remote,
-            &progress,
-            &mut pr_map,
-        ) {
-            progress.finish_err(&e.to_string());
-            return Err(e);
-        }
+        let change_short = &p.commit.change_id[..12.min(p.commit.change_id.len())];
+        let action = if p.is_new { "created" } else { "updated" };
+        eprintln!(
+            "{} [{}] {} — PR #{} {}",
+            style("✓").green().bold(),
+            change_short,
+            title,
+            pr_num,
+            action
+        );
     }
 
     Ok(())
@@ -218,14 +434,16 @@ fn extract_pr_number(description: &str) -> Option<u32> {
         .find_map(|line| line.trim().strip_prefix("PR: #")?.parse().ok())
 }
 
-fn get_stack(jj: &Jj, commit: &JjLogCommit, pr_map: &HashMap<String, u32>) -> Result<Vec<StackCommit>> {
-    jj.get_stack(&commit.change_id)
+fn get_stack(
+    jj: &Jj,
+    change_id: &str,
+    pr_map: &HashMap<String, u32>,
+) -> Result<Vec<StackCommit>> {
+    jj.get_stack(change_id)
         .context("Failed to get stack")?
         .iter()
         .map(|line| {
             let raw: JjLogCommit = serde_json::from_str(line)?;
-            // pr_map takes precedence: it reflects PRs created in this run that
-            // may not yet be in the commit description (stale after describe+rebase)
             let pr_number = pr_map
                 .get(&raw.change_id)
                 .copied()
@@ -268,7 +486,6 @@ fn generate_stack_graph(
             }
         }
 
-        // Use the commit_id from the stack (reflects current state after rebases)
         let current_commit_id = &stack[idx].commit_id;
         let review_suffix = stack[first_idx]
             .parents
@@ -321,180 +538,4 @@ fn generate_stack_graph(
         details_md,
         review_suffix,
     }
-}
-
-fn submit_commit(
-    jj: &Jj,
-    gh: &Gh,
-    commit: &JjLogCommit,
-    ctx: &SubmitContext,
-    auth: &GhAuth,
-    bookmark_prefix: &str,
-    upstream_repo: &str,
-    origin_remote: &str,
-    progress: &Progress,
-    pr_map: &mut HashMap<String, u32>,
-) -> Result<()> {
-    let stack = get_stack(jj, commit, pr_map)?;
-    let graph = generate_stack_graph(&stack, &commit.change_id, upstream_repo);
-    let pr_number = extract_pr_number(&commit.description);
-
-    let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
-        progress.set_action("fetching PR branch...");
-        (gh.pr_view_head_ref(upstream_repo, pr_num)?, false)
-    } else {
-        (
-            format!(
-                "{}{}",
-                bookmark_prefix,
-                &commit.change_id[..12.min(commit.change_id.len())]
-            ),
-            true,
-        )
-    };
-
-    progress.set_action(&format!(
-        "setting bookmark {}...",
-        style(&bookmark_name).dim()
-    ));
-    jj.bookmark_set(&bookmark_name, &commit.change_id)?;
-
-    if is_new {
-        progress.set_action(&format!(
-            "tracking {} on {}...",
-            style(&bookmark_name).dim(),
-            origin_remote
-        ));
-        jj.bookmark_track(&bookmark_name, origin_remote)?;
-    }
-
-    progress.set_action(&format!(
-        "pushing {} to {}...",
-        style(&bookmark_name).dim(),
-        origin_remote
-    ));
-    jj.git_push(origin_remote, &bookmark_name, &mut |line| {
-        progress.pb.println(line)
-    })?;
-
-    if is_new {
-        let (pr_num, url) = create_pr(
-            jj,
-            gh,
-            commit,
-            ctx,
-            auth,
-            upstream_repo,
-            &bookmark_name,
-            origin_remote,
-            &graph.to_body_prefix(),
-            progress,
-        )?;
-        pr_map.insert(commit.change_id.clone(), pr_num);
-        progress.finish_ok(&format!("PR created: {}", style(url).underlined()));
-    } else {
-        let pr_num = pr_number.unwrap();
-        update_pr(gh, commit, upstream_repo, pr_num, &graph, progress)?;
-        progress.finish_ok(&format!("PR #{} updated", pr_num));
-    }
-
-    Ok(())
-}
-
-fn create_pr(
-    jj: &Jj,
-    gh: &Gh,
-    commit: &JjLogCommit,
-    ctx: &SubmitContext,
-    auth: &GhAuth,
-    upstream: &str,
-    bookmark: &str,
-    origin_remote: &str,
-    body_prefix: &str,
-    progress: &Progress,
-) -> Result<(u32, String)> {
-    let title = commit
-        .description
-        .lines()
-        .next()
-        .unwrap_or("No description");
-    let body = format!("{}\n{}", body_prefix, commit.description);
-
-    progress.set_action("fetching default branch...");
-    let base = gh.default_branch(upstream)?;
-
-    let head_owner = ctx
-        .config
-        .head_repo
-        .as_deref()
-        .and_then(|r| r.split('/').next())
-        .unwrap_or(&auth.login);
-    let head = format!("{}:{}", head_owner, bookmark);
-
-    progress.set_action("creating PR...");
-    let (pr_num, url) = gh.create_pr(
-        upstream,
-        title,
-        &body,
-        &head,
-        &base,
-        ctx.config.head_repo.as_deref(),
-    )?;
-
-    progress.set_action("updating commit description...");
-    let mut new_desc = commit.description.trim_end().to_string();
-    if !new_desc.is_empty() {
-        new_desc.push_str("\n\n");
-    }
-    new_desc.push_str(&format!("PR: #{}", pr_num));
-    jj.describe(&commit.change_id, &new_desc)?;
-
-    // describe creates a new commit hash; re-point the bookmark to the new commit
-    jj.bookmark_set(bookmark, &commit.change_id)?;
-
-    progress.set_action("pushing updated description...");
-    jj.git_push(origin_remote, bookmark, &mut |line| {
-        progress.pb.println(line)
-    })?;
-
-    Ok((pr_num, url))
-}
-
-fn update_pr(
-    gh: &Gh,
-    commit: &JjLogCommit,
-    upstream: &str,
-    pr_num: u32,
-    graph: &StackGraph,
-    progress: &Progress,
-) -> Result<()> {
-    progress.set_action(&format!("fetching PR #{} body...", pr_num));
-    let current_body = gh.pr_view_body(upstream, pr_num)?;
-    let user_content = current_body
-        .split_once("<!-- jellycat -->")
-        .map(|(_, rest)| rest.trim())
-        .unwrap_or_else(|| commit.description.trim());
-
-    let review_link = format!(
-        "[Review Changes in This PR](https://github.com/{}/pull/{}/{})",
-        upstream, pr_num, graph.review_suffix
-    );
-    let mut final_nav = graph.nav_items.clone();
-    if !final_nav.is_empty() {
-        final_nav.insert((final_nav.len() + 1) / 2, review_link);
-    } else {
-        final_nav.push(review_link);
-    }
-
-    let body = format!(
-        "{}\n\n{}\n{}",
-        final_nav.join(" | "),
-        graph.details_md,
-        user_content
-    );
-
-    progress.set_action(&format!("updating PR #{}...", pr_num));
-    gh.pr_edit_body(upstream, pr_num, &body)?;
-
-    Ok(())
 }

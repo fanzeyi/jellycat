@@ -265,6 +265,19 @@ impl Jj {
         Ok(())
     }
 
+    pub fn abandon(&self, change_ids: &[&str]) -> Result<bool> {
+        if change_ids.is_empty() {
+            return Ok(true);
+        }
+        let mut cmd = self.cmd();
+        cmd.arg("abandon");
+        for id in change_ids {
+            cmd.arg("-r").arg(id);
+        }
+        self.log_cmd(&cmd);
+        self.runner.run_status(&mut cmd)
+    }
+
     pub fn git_push(
         &self,
         remote: &str,

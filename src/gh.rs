@@ -157,6 +157,53 @@ impl Gh {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
+    /// Fetches the state of multiple PRs in a single GitHub GraphQL API call.
+    /// Returns a map of `pr_num → state` where state is `"OPEN"`, `"CLOSED"`, or `"MERGED"`.
+    pub fn pr_states(&self, upstream: &str, pr_nums: &[u32]) -> Result<HashMap<u32, String>> {
+        if pr_nums.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let (owner, name) = upstream
+            .split_once('/')
+            .ok_or_else(|| anyhow!("Invalid upstream format '{}', expected 'owner/repo'", upstream))?;
+
+        let aliases: Vec<String> = pr_nums
+            .iter()
+            .map(|n| format!("pr_{}: pullRequest(number: {}) {{ state }}", n, n))
+            .collect();
+
+        let query = format!(
+            "query {{ repository(owner: \"{}\", name: \"{}\") {{ {} }} }}",
+            owner,
+            name,
+            aliases.join(" ")
+        );
+
+        let mut cmd = self.cmd();
+        cmd.args(["api", "graphql", "-f", &format!("query={}", query)]);
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+
+        if !output.status.success() {
+            return Err(anyhow!("gh api graphql failed: {}", Self::api_error(&output)));
+        }
+
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let repo_data = &data["data"]["repository"];
+
+        let mut result = HashMap::new();
+        for &pr_num in pr_nums {
+            let alias = format!("pr_{}", pr_num);
+            if let Some(state) = repo_data[&alias]["state"].as_str() {
+                result.insert(pr_num, state.to_string());
+            }
+        }
+
+        Ok(result)
+    }
+
     pub fn create_pr(
         &self,
         upstream: &str,

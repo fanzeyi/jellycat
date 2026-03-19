@@ -1,8 +1,8 @@
-# Jellycat
+# Jellycat ("jc")
 
-A CLI tool that bridges [Jujutsu (`jj`)](https://github.com/martinvonz/jj) version control with GitHub Pull Requests. It automates bookmark management, pushing to remotes, and PR creation/updates — including stacked PR workflows.
+_A **jelly**fish copy**cat**_
 
-The binary is installed as `jc`.
+This is a Jellyfish inspired CLI tool for managing [Jujutsu (`jj`)](https://github.com/martinvonz/jj) changesets with GitHub PRs. It aims to make sending stacks of changesets to GitHub easier.
 
 ## Prerequisites
 

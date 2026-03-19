@@ -5,6 +5,12 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::sync::Arc;
 
+#[derive(Debug, Clone)]
+pub struct PrInfo {
+    pub state: String,
+    pub comment_count: u32,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct GhAuth {
     pub login: String,
@@ -157,9 +163,8 @@ impl Gh {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Fetches the state of multiple PRs in a single GitHub GraphQL API call.
-    /// Returns a map of `pr_num → state` where state is `"OPEN"`, `"CLOSED"`, or `"MERGED"`.
-    pub fn pr_states(&self, upstream: &str, pr_nums: &[u32]) -> Result<HashMap<u32, String>> {
+    /// Fetches the state and comment count of multiple PRs in a single GitHub GraphQL API call.
+    pub fn pr_states(&self, upstream: &str, pr_nums: &[u32]) -> Result<HashMap<u32, PrInfo>> {
         if pr_nums.is_empty() {
             return Ok(HashMap::new());
         }
@@ -170,7 +175,10 @@ impl Gh {
 
         let aliases: Vec<String> = pr_nums
             .iter()
-            .map(|n| format!("pr_{}: pullRequest(number: {}) {{ state }}", n, n))
+            .map(|n| format!(
+                "pr_{}: pullRequest(number: {}) {{ state comments {{ totalCount }} reviews(first: 0) {{ totalCount }} }}",
+                n, n
+            ))
             .collect();
 
         let query = format!(
@@ -196,8 +204,14 @@ impl Gh {
         let mut result = HashMap::new();
         for &pr_num in pr_nums {
             let alias = format!("pr_{}", pr_num);
-            if let Some(state) = repo_data[&alias]["state"].as_str() {
-                result.insert(pr_num, state.to_string());
+            let pr_data = &repo_data[&alias];
+            if let Some(state) = pr_data["state"].as_str() {
+                let comments = pr_data["comments"]["totalCount"].as_u64().unwrap_or(0) as u32;
+                let reviews = pr_data["reviews"]["totalCount"].as_u64().unwrap_or(0) as u32;
+                result.insert(pr_num, PrInfo {
+                    state: state.to_string(),
+                    comment_count: comments + reviews,
+                });
             }
         }
 

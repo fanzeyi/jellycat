@@ -46,7 +46,7 @@ pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
         .filter(|(_, pr_num)| {
             states
                 .get(pr_num)
-                .map(|s| s == "CLOSED" || s == "MERGED")
+                .map(|info| info.state == "CLOSED" || info.state == "MERGED")
                 .unwrap_or(false)
         })
         .collect();
@@ -60,7 +60,7 @@ pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
     let _ = jj.abandon(&change_ids);
 
     for (change_id, pr_num) in &to_tidy {
-        let state = states.get(pr_num).map(|s| s.as_str()).unwrap_or("unknown");
+        let state = states.get(pr_num).map(|info| info.state.as_str()).unwrap_or("unknown");
         let key = format!("jellycat.prs.{}", change_id);
         jj.config_unset(&key)?;
         let change_short = &change_id[..12.min(change_id.len())];

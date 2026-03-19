@@ -5,7 +5,12 @@ use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "jc", version, about, long_about = None)]
+#[command(
+    name = "jc",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("GIT_HASH"), ")"),
+    about,
+    long_about = None,
+)]
 struct Cli {
     #[arg(short, long, global = true)]
     debug: bool,

@@ -380,12 +380,14 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         let change_short = &p.commit.change_id[..12.min(p.commit.change_id.len())];
         let action = if p.is_new { "created" } else { "updated" };
         eprintln!(
-            "{} [{}] {} — PR #{} {}",
+            "{} [{}] {} — PR #{} {} (https://github.com/{}/pull/{})",
             style("✓").green().bold(),
             change_short,
             title,
             pr_num,
-            action
+            action,
+            upstream_repo,
+            pr_num
         );
     }
 

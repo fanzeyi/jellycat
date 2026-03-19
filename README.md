@@ -41,9 +41,9 @@ jc tidy
 
 ## Demo
 
-https://github.com/user-attachments/assets/b4718fe3-484a-4bd8-bf68-e75a398cbbd3
+https://github.com/user-attachments/assets/850dfd89-0370-4652-8559-9cd5c801d176
 
-<img width="601" height="428" alt="Image" src="https://github.com/user-attachments/assets/68d26f40-e9b0-491f-b77e-edbd9595beea" />
+<img width="1202" height="856" alt="Image" src="https://github.com/user-attachments/assets/9c6c54a8-9e47-4432-a407-4b560bbe053d" />
 
 ## Commands
 

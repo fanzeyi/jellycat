@@ -107,6 +107,20 @@ impl Jj {
         Ok(())
     }
 
+    pub fn config_unset(&self, key: &str) -> Result<()> {
+        let mut cmd = self.cmd();
+        cmd.arg("config")
+            .arg("unset")
+            .arg("--repo")
+            .arg(key);
+        self.log_cmd(&cmd);
+        if !self.runner.run_status(&mut cmd)? {
+            return Err(anyhow!("jj config unset failed"));
+        }
+
+        Ok(())
+    }
+
     pub fn git_remote_list(&self) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("remote").arg("list");

@@ -1,6 +1,7 @@
+use crate::config;
 use crate::jj::Jj;
 use crate::repo;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -22,52 +23,30 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
 
     // 1. Get the commit.
     let commit =
-        repo::get_single_commit(&repo_root, &args.revset).context("Failed to get commit")?;
+        repo::get_single_commit(&repo_root, &args.revset)?;
 
-    // 2. Filter out PR lines.
-    let mut new_description_lines = Vec::new();
-    let mut pr_unlinked = false;
-    for line in commit.description.lines() {
-        let trimmed_line = line.trim();
-        let mut keep_line = true;
-        if trimmed_line.starts_with("PR: #") {
-            if let Some(pr_number_to_unlink) = args.pr_number {
-                if let Some(pr_num_str) = trimmed_line.strip_prefix("PR: #") {
-                    if let Ok(pr_num) = pr_num_str.parse::<u32>() {
-                        if pr_num == pr_number_to_unlink {
-                            keep_line = false;
-                            pr_unlinked = true;
-                        }
-                    }
-                }
-            } else {
-                // No PR number specified, remove all PR lines.
-                keep_line = false;
-                pr_unlinked = true;
-            }
-        }
-        if keep_line {
-            new_description_lines.push(line);
-        }
-    }
+    // 2. Check config for existing PR link.
+    let cfg = config::load(&repo_root)?;
+    let existing_pr = cfg.prs.get(&commit.change_id).copied();
 
-    if !pr_unlinked {
-        if let Some(pr_number) = args.pr_number {
+    match (existing_pr, args.pr_number) {
+        (None, _) => {
+            eprintln!("Warning: No PR found linked to changeset {}.", commit.change_id);
+            return Ok(());
+        }
+        (Some(existing), Some(requested)) if existing != requested => {
             eprintln!(
-                "Warning: PR #{} not found in commit description.",
-                pr_number
+                "Warning: PR #{} not found linked to changeset {} (linked to PR #{}).",
+                requested, commit.change_id, existing
             );
-        } else {
-            eprintln!("Warning: No PRs found in commit description to unlink.");
+            return Ok(());
         }
-        return Ok(());
+        _ => {}
     }
 
-    let new_description = new_description_lines.join("\n");
-
-    // 3. Update commit description.
-    jj.describe(&commit.change_id, &new_description)
-        .context("jj describe failed")?;
+    // 3. Remove PR mapping from config.
+    let key = format!("jellycat.prs.{}", commit.change_id);
+    jj.config_unset(&key)?;
 
     if let Some(pr_number) = args.pr_number {
         println!(
@@ -75,7 +54,11 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
             pr_number, commit.change_id
         );
     } else {
-        println!("Unlinked all PRs from changeset {}", commit.change_id);
+        let pr = existing_pr.unwrap();
+        println!(
+            "Unlinked PR #{} from changeset {}",
+            pr, commit.change_id
+        );
     }
 
     Ok(())

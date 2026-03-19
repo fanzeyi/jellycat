@@ -123,7 +123,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .upstream
         .as_ref()
         .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))
-        .map(|s| s.clone())?;
+        .cloned()?;
 
     let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin").to_string();
 
@@ -143,7 +143,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     // Track PR numbers for commits, keyed by change_id.
     let mut pr_map: HashMap<String, u32> = commits
         .iter()
-        .filter_map(|c| extract_pr_number(&c.description).map(|n| (c.change_id.clone(), n)))
+        .filter_map(|c| ctx.config.prs.get(&c.change_id).map(|&n| (c.change_id.clone(), n)))
         .collect();
 
     let total = commits.len();
@@ -159,7 +159,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let gh = Arc::clone(&gh);
                 let upstream = upstream_repo.clone();
                 let prefix = bookmark_prefix.clone();
-                let pr_number = extract_pr_number(&commit.description);
+                let pr_number = pr_map.get(&commit.change_id).copied();
                 std::thread::spawn(move || -> Result<PreparedCommit> {
                     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
                         (gh.pr_view_head_ref(&upstream, pr_num)?, false)
@@ -361,49 +361,11 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     pb.set_style(success_spinner_style());
     pb.finish_with_message(format!("Updated {} PR body(ies)", total));
 
-    // Phases 6 & 7 only apply to commits that received new PRs.
-    let has_new = prepared.iter().any(|p| p.is_new);
-    if has_new {
-        // Phase 6: Describe new commits (sequential, bottom-to-top).
-        // Each describe rebases descendants, so order matters.
-        let pb = new_spinner();
-        pb.set_message("Updating commit descriptions with PR numbers...");
-        for p in prepared.iter().filter(|p| p.is_new) {
-            let pr_num = pr_map[&p.commit.change_id];
-            let mut new_desc = p.commit.description.trim_end().to_string();
-            if !new_desc.is_empty() {
-                new_desc.push_str("\n\n");
-            }
-            new_desc.push_str(&format!("PR: #{}", pr_num));
-            jj.describe(&p.commit.change_id, &new_desc)?;
-        }
-        pb.set_style(success_spinner_style());
-        pb.finish_with_message("Commit descriptions updated");
-
-        // Phase 7: Re-point bookmarks + batch push #2.
-        // describe creates new commit hashes; re-point bookmarks before pushing.
-        let new_commits: Vec<&PreparedCommit> =
-            prepared.iter().filter(|p| p.is_new).collect();
-        for p in &new_commits {
-            jj.bookmark_set(&p.bookmark_name, &p.commit.change_id)?;
-        }
-        let new_names: Vec<&str> = new_commits
-            .iter()
-            .map(|p| p.bookmark_name.as_str())
-            .collect();
-        let pb = new_spinner();
-        pb.set_message(format!(
-            "Pushing {} updated bookmark(s)...",
-            new_names.len()
-        ));
-        {
-            let pb_clone = pb.clone();
-            jj.git_push_bookmarks(&origin_remote, &new_names, &mut |line| {
-                pb_clone.println(line)
-            })?;
-        }
-        pb.set_style(success_spinner_style());
-        pb.finish_with_message(format!("Pushed {} updated bookmark(s)", new_names.len()));
+    // Save new PR mappings to jj config.
+    for p in prepared.iter().filter(|p| p.is_new) {
+        let pr_num = pr_map[&p.commit.change_id];
+        let key = format!("jellycat.prs.{}", p.commit.change_id);
+        jj.config_set(&key, &pr_num.to_string())?;
     }
 
     // Summary
@@ -439,12 +401,6 @@ fn commit_body(description: &str) -> String {
     }
 }
 
-fn extract_pr_number(description: &str) -> Option<u32> {
-    description
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("PR: #")?.parse().ok())
-}
-
 fn get_stack(
     jj: &Jj,
     change_id: &str,
@@ -455,10 +411,7 @@ fn get_stack(
         .iter()
         .map(|line| {
             let raw: JjLogCommit = serde_json::from_str(line)?;
-            let pr_number = pr_map
-                .get(&raw.change_id)
-                .copied()
-                .or_else(|| extract_pr_number(&raw.description));
+            let pr_number = pr_map.get(&raw.change_id).copied();
             Ok(StackCommit {
                 pr_number,
                 commit_id: raw.commit_id,

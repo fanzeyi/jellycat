@@ -9,6 +9,7 @@ pub struct Config {
     pub origin: Option<String>,
     pub head_repo: Option<String>,
     pub github_user: Option<String>,
+    pub prs: HashMap<String, u32>,
     pub extra: HashMap<String, String>,
 }
 
@@ -38,6 +39,10 @@ pub fn load(repo_path: &Path) -> Result<Config> {
                     config.head_repo = Some(value.to_string());
                 } else if key == "jellycat.github_user" {
                     config.github_user = Some(value.to_string());
+                } else if let Some(change_id) = key.strip_prefix("jellycat.prs.") {
+                    if let Ok(pr_num) = value.parse::<u32>() {
+                        config.prs.insert(change_id.to_string(), pr_num);
+                    }
                 } else {
                     config.extra.insert(key.to_string(), value.to_string());
                 }

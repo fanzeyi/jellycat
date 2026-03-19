@@ -1,4 +1,4 @@
-use crate::jj::Jj;
+use crate::config;
 use crate::repo;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
@@ -22,52 +22,30 @@ pub fn run(args: &LinkArgs) -> Result<()> {
         anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
     })?;
 
-    let jj = Jj::new(repo_root.clone());
-
     // 1. Get the commit.
     let commit =
         repo::get_single_commit(&repo_root, &args.revset).context("Failed to get commit")?;
 
-    // 2. Check for existing PRs and filter them out if --force is used.
-    let mut new_description_lines = Vec::new();
-    let mut already_linked = false;
-    for line in commit.description.lines() {
-        if let Some(pr_num_str) = line.trim().strip_prefix("PR: #") {
-            if let Ok(pr_num) = pr_num_str.parse::<u32>() {
-                if !args.force {
-                    if pr_num == args.pr_number {
-                        println!(
-                            "PR #{} is already linked to changeset {}.",
-                            args.pr_number, commit.change_id
-                        );
-                        already_linked = true;
-                    } else {
-                        return Err(anyhow!(
-                            "Commit is already linked to PR #{}. Use --force to overwrite.",
-                            pr_num
-                        ));
-                    }
-                }
-            }
-        } else {
-            new_description_lines.push(line);
+    // 2. Check for existing PR link in config.
+    let cfg = config::load(&repo_root)?;
+    if let Some(&existing_pr) = cfg.prs.get(&commit.change_id) {
+        if !args.force && existing_pr == args.pr_number {
+            println!(
+                "PR #{} is already linked to changeset {}.",
+                args.pr_number, commit.change_id
+            );
+            return Ok(());
+        } else if !args.force {
+            return Err(anyhow!(
+                "Commit is already linked to PR #{}. Use --force to overwrite.",
+                existing_pr
+            ));
         }
     }
 
-    if already_linked {
-        return Ok(());
-    }
-
-    // 3. Construct the new description.
-    let mut new_description = new_description_lines.join("\n").trim_end().to_string();
-    if !new_description.is_empty() {
-        new_description.push_str("\n\n");
-    }
-    new_description.push_str(&format!("PR: #{}", args.pr_number));
-
-    // 4. Update commit description.
-    jj.describe(&commit.change_id, &new_description)
-        .context("jj describe failed")?;
+    // 3. Save PR mapping to config.
+    let key = format!("jellycat.prs.{}", commit.change_id);
+    config::save(&repo_root, &key, &args.pr_number.to_string())?;
 
     println!(
         "Linked PR #{} to change {}",

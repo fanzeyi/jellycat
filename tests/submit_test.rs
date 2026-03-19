@@ -34,6 +34,7 @@ fn test_submit_auth_failure() {
         origin: Some("origin".to_string()),
         head_repo: None,
         github_user: None,
+        prs: HashMap::new(),
         extra: HashMap::new(),
     };
 
@@ -105,10 +106,9 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 5. jj bookmark_set — called twice: once before push, once after describe
-    //    (the second call re-points the bookmark to the new commit to avoid divergence)
+    // 5. jj bookmark_set — called once (no Phase 7 re-point)
     mock_runner.expect_run_output()
-        .times(2)
+        .times(1)
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
             args.contains(&std::ffi::OsStr::new("bookmark")) && args.contains(&std::ffi::OsStr::new("set"))
@@ -131,7 +131,7 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 7. jj git push — Phase 3 (all bookmarks) + Phase 7 (new bookmarks after describe)
+    // 7. jj git push — only Phase 3 (single push, no Phase 7)
     mock_runner.expect_run_status()
         .withf(|cmd| cmd.get_args().any(|a| a == "push"))
         .returning(|_| Ok(true));
@@ -159,20 +159,20 @@ fn test_submit_success_new_pr() {
             stderr: Vec::new(),
         }));
 
-    // 10. jj describe (Phase 6 — link PR number into commit description)
-    mock_runner.expect_run_output()
-        .withf(|cmd| cmd.get_args().any(|a| a == "describe"))
-        .returning(|_| Ok(Output {
-            status: ExitStatus::from_raw(0),
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-        }));
+    // 10. jj config set (save PR mapping to config)
+    mock_runner.expect_run_status()
+        .withf(|cmd| {
+            let args: Vec<_> = cmd.get_args().collect();
+            args.contains(&std::ffi::OsStr::new("config")) && args.contains(&std::ffi::OsStr::new("set"))
+        })
+        .returning(|_| Ok(true));
 
     let config = Config {
         upstream: Some("owner/repo".to_string()),
         origin: Some("origin".to_string()),
         head_repo: None,
         github_user: None,
+        prs: HashMap::new(),
         extra: HashMap::new(),
     };
 
@@ -186,8 +186,8 @@ fn test_submit_success_new_pr() {
     };
 
     let result = run_with_context(&args, &ctx);
-    
+
     std::env::set_current_dir(original_dir).unwrap();
-    
+
     assert!(result.is_ok(), "Submit failed: {:?}", result.err());
 }

@@ -5,78 +5,142 @@ use crate::repo;
 use anyhow::{Result, anyhow};
 use clap::Args;
 use console::style;
+use serde::Deserialize;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct TidyArgs {}
 
+#[derive(Deserialize)]
+struct JjLogCommit {
+    change_id: String,
+}
+
 pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
     let runner: Arc<dyn crate::jj::CommandRunner + Send + Sync> = Arc::new(DefaultRunner);
-
-    let gh = if let Some(user) = &config.github_user {
-        let token = Gh::get_token(&runner, user)?;
-        Gh::with_token(Arc::clone(&runner), token)
-    } else {
-        let gh = Gh::new(Arc::clone(&runner));
-        let _auth = gh.auth_status()?;
-        gh
-    };
 
     let repo_root = repo::find_root()
         .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
     let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
 
-    let upstream = config
-        .upstream
-        .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
-
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");
         return Ok(());
     }
 
-    let pr_nums: Vec<u32> = config.prs.values().copied().collect();
-    let states = gh.pr_states(upstream, &pr_nums)?;
+    // Find which tracked change IDs still exist in jj.
+    let revset = config
+        .prs
+        .keys()
+        .map(|id| id.as_str())
+        .collect::<Vec<_>>()
+        .join(" | ");
 
-    let to_tidy: Vec<(&String, &u32)> = config
+    let existing_change_ids: HashSet<String> = match jj.log(&revset, "json(self) ++ \"\\n\"") {
+        Ok(output) => output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .filter_map(|l| serde_json::from_str::<JjLogCommit>(l).ok())
+            .map(|c| c.change_id)
+            .collect(),
+        Err(_) => HashSet::new(),
+    };
+
+    // Collect abandoned change IDs (tracked but no longer in jj).
+    let abandoned: Vec<(&String, &u32)> = config
         .prs
         .iter()
-        .filter(|(_, pr_num)| {
-            states
-                .get(pr_num)
-                .map(|info| info.state == "CLOSED" || info.state == "MERGED")
-                .unwrap_or(false)
-        })
+        .filter(|(change_id, _)| !existing_change_ids.contains(change_id.as_str()))
         .collect();
 
-    if to_tidy.is_empty() {
+    // Query GitHub for PR states on remaining (non-abandoned) entries.
+    let live_prs: Vec<(&String, &u32)> = config
+        .prs
+        .iter()
+        .filter(|(change_id, _)| existing_change_ids.contains(change_id.as_str()))
+        .collect();
+
+    let to_tidy: Vec<(&String, &u32)> = if !live_prs.is_empty() {
+        let gh = if let Some(user) = &config.github_user {
+            let token = Gh::get_token(&runner, user)?;
+            Gh::with_token(Arc::clone(&runner), token)
+        } else {
+            let gh = Gh::new(Arc::clone(&runner));
+            let _auth = gh.auth_status()?;
+            gh
+        };
+
+        let upstream = config
+            .upstream
+            .as_ref()
+            .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
+
+        let pr_nums: Vec<u32> = live_prs.iter().map(|(_, pr)| **pr).collect();
+        let states = gh.pr_states(upstream, &pr_nums)?;
+
+        let closed: Vec<(&String, &u32)> = live_prs
+            .into_iter()
+            .filter(|(_, pr_num)| {
+                states
+                    .get(pr_num)
+                    .map(|info| info.state == "CLOSED" || info.state == "MERGED")
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        // Abandon changesets for closed/merged PRs.
+        if !closed.is_empty() {
+            let change_ids: Vec<&str> = closed.iter().map(|(cid, _)| cid.as_str()).collect();
+            let _ = jj.abandon(&change_ids);
+        }
+
+        for (change_id, pr_num) in &closed {
+            let state = states
+                .get(pr_num)
+                .map(|info| info.state.as_str())
+                .unwrap_or("unknown");
+            let change_short = &change_id[..12.min(change_id.len())];
+            eprintln!(
+                "{} [{}] PR #{} ({}) — removed",
+                style("✓").green().bold(),
+                change_short,
+                pr_num,
+                state.to_lowercase(),
+            );
+        }
+
+        closed
+    } else {
+        vec![]
+    };
+
+    // Report abandoned entries.
+    for (change_id, pr_num) in &abandoned {
+        let change_short = &change_id[..12.min(change_id.len())];
+        eprintln!(
+            "{} [{}] PR #{} (abandoned) — removed",
+            style("✓").green().bold(),
+            change_short,
+            pr_num,
+        );
+    }
+
+    let total = to_tidy.len() + abandoned.len();
+
+    if total == 0 {
         eprintln!("All tracked PRs are still open.");
         return Ok(());
     }
 
-    let change_ids: Vec<&str> = to_tidy.iter().map(|(cid, _)| cid.as_str()).collect();
-    let _ = jj.abandon(&change_ids);
-
-    for (change_id, pr_num) in &to_tidy {
-        let state = states.get(pr_num).map(|info| info.state.as_str()).unwrap_or("unknown");
+    // Remove config entries for both closed PRs and abandoned changesets.
+    for (change_id, _) in to_tidy.iter().chain(abandoned.iter()) {
         let key = format!("jellycat.prs.{}", change_id);
         jj.config_unset(&key)?;
-        let change_short = &change_id[..12.min(change_id.len())];
-        eprintln!(
-            "{} [{}] PR #{} ({}) — removed",
-            style("✓").green().bold(),
-            change_short,
-            pr_num,
-            state.to_lowercase(),
-        );
     }
 
-    eprintln!(
-        "\nTidied {} PR mapping(s).",
-        to_tidy.len(),
-    );
+    eprintln!("\nTidied {} PR mapping(s).", total);
 
     Ok(())
 }

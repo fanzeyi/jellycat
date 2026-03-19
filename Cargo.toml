@@ -2,6 +2,9 @@
 name = "jellycat"
 version = "0.1.0"
 edition = "2024"
+description = "A CLI tool that bridges Jujutsu (jj) version control with GitHub Pull Requests"
+license = "MIT"
+repository = "https://github.com/fanzeyi/jellycat"
 
 [[bin]]
 name = "jc"

@@ -4,8 +4,6 @@ _A **jelly**fish copy**cat**_
 
 This is a Jellyfish inspired CLI tool for managing [Jujutsu (`jj`)](https://github.com/martinvonz/jj) changesets with GitHub PRs. It aims to make sending stacks of changesets to GitHub easier.
 
-https://github.com/user-attachments/assets/b4718fe3-484a-4bd8-bf68-e75a398cbbd3
-
 ## Prerequisites
 
 - [Jujutsu (`jj`)](https://github.com/martinvonz/jj) with a colocated or native repo
@@ -40,6 +38,12 @@ jc status
 # Clean up after PRs are merged
 jc tidy
 ```
+
+## Demo
+
+https://github.com/user-attachments/assets/b4718fe3-484a-4bd8-bf68-e75a398cbbd3
+
+<img width="601" height="428" alt="Image" src="https://github.com/user-attachments/assets/68d26f40-e9b0-491f-b77e-edbd9595beea" />
 
 ## Commands
 

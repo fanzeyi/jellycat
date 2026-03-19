@@ -5,7 +5,7 @@ use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(name = "jc", version, about, long_about = None)]
 struct Cli {
     #[arg(short, long, global = true)]
     debug: bool,
@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
     let config = config::load(&repo_root).context("Error loading config")?;
 
     if config.upstream.is_none() {
-        return Err(anyhow::anyhow!("jellycat upstream not configured. Please run `jellycat init`."));
+        return Err(anyhow::anyhow!("jellycat upstream not configured. Please run `jc init`."));
     }
 
     match &cli.command {

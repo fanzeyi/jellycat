@@ -45,7 +45,7 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
     let upstream = config
         .upstream
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
+        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))?;
 
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");

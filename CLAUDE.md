@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Jellycat is a Rust CLI tool that bridges [Jujutsu (`jj`)](https://github.com/martinvonz/jj) version control with GitHub Pull Requests. It automates bookmark management, pushing to remotes, and PR creation/updates.
+Jellycat is a Rust CLI tool (binary: `jc`) that bridges [Jujutsu (`jj`)](https://github.com/martinvonz/jj) version control with GitHub Pull Requests. It automates bookmark management, pushing to remotes, and PR creation/updates.
 
 ## Commands
 

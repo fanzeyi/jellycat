@@ -2,6 +2,8 @@
 
 A CLI tool that bridges [Jujutsu (`jj`)](https://github.com/martinvonz/jj) version control with GitHub Pull Requests. It automates bookmark management, pushing to remotes, and PR creation/updates — including stacked PR workflows.
 
+The binary is installed as `jc`.
+
 ## Prerequisites
 
 - [Jujutsu (`jj`)](https://github.com/martinvonz/jj) with a colocated or native repo
@@ -18,40 +20,41 @@ cargo install --path .
 
 ```bash
 # Initialize in a jj repo
-jellycat init
+jc init
 
 # Create a commit and submit it as a PR
 jj new -m "my feature"
-jellycat submit
+jc submit
 
 # Check PR status
-jellycat status
+jc status
 
 # Clean up after PRs are merged
-jellycat tidy
+jc tidy
 ```
 
 ## Commands
 
-### `jellycat init [--force]`
+### `jc init [--force]`
 
 Initialize jellycat configuration for the current repository. Prompts for the upstream GitHub repo (`owner/repo`) and which git remote to push to.
 
 Use `--force` to reconfigure an already-initialized repo.
 
-### `jellycat submit [-r <REVSET>]`
+### `jc submit [-r <REVSET>]`
 
 Push commits and create or update GitHub PRs.
 
 - `-r, --revset <REVSET>` — Revset to submit (default: `@`, the current commit)
 
 This command:
+
 1. Creates jj bookmarks for each commit
 2. Pushes bookmarks to the configured remote
 3. Creates new PRs or updates existing ones
 4. Adds stack navigation links to PR bodies (for multi-PR stacks)
 
-### `jellycat link [-r <REVSET>] <PR_NUMBER> [--force]`
+### `jc link [-r <REVSET>] <PR_NUMBER> [--force]`
 
 Manually associate a commit with an existing GitHub PR.
 
@@ -59,20 +62,21 @@ Manually associate a commit with an existing GitHub PR.
 - `<PR_NUMBER>` — The PR number to associate
 - `--force` — Overwrite an existing PR association
 
-### `jellycat unlink [-r <REVSET>] [PR_NUMBER]`
+### `jc unlink [-r <REVSET>] [PR_NUMBER]`
 
 Remove a PR association from a commit.
 
 - `-r, --revset <REVSET>` — Revset to unlink (default: `@`)
 - `[PR_NUMBER]` — Specific PR number to unlink (default: unlink all)
 
-### `jellycat status`
+### `jc status`
 
 Show the status of all tracked PRs, including their GitHub state (open/merged/closed), comment counts, and associated commit info.
 
-### `jellycat tidy`
+### `jc tidy`
 
 Clean up after merged, closed, or abandoned work:
+
 - Removes config entries for changesets that have been abandoned in jj
 - Abandons changesets linked to merged/closed PRs
 - Removes all corresponding config entries
@@ -81,31 +85,17 @@ Clean up after merged, closed, or abandoned work:
 
 Configuration is stored in jj's repo-local config under the `jellycat.*` namespace. Most keys are set automatically by `init` and `submit`.
 
-| Key | Description | Set by |
-|-----|-------------|--------|
-| `jellycat.upstream` | Target GitHub repo (`owner/repo`) | `init` |
-| `jellycat.origin` | Git remote name to push to | `init` |
-| `jellycat.head_repo` | Fork repo for cross-fork PRs (`owner/repo`) | manual |
-| `jellycat.github_user` | GitHub username for per-user token auth | manual |
-| `jellycat.bookmark_prefix` | Prefix for created bookmarks (default: `jellycat/`) | manual |
-| `jellycat.prs.<change-id>` | PR number linked to a change ID | `submit`, `link`, `tidy` |
+| Key                        | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| `jellycat.upstream`        | Target GitHub repo (`owner/repo`)                   |
+| `jellycat.origin`          | Git remote name to push to                          |
+| `jellycat.head_repo`       | Fork repo for cross-fork PRs (`owner/repo`)         |
+| `jellycat.github_user`     | GitHub username for per-user token auth             |
+| `jellycat.bookmark_prefix` | Prefix for created bookmarks (default: `jellycat/`) |
+| `jellycat.prs.<change-id>` | PR number linked to a change ID                     |
 
 Set config values with:
 
 ```bash
 jj config set --repo jellycat.head_repo "myuser/myrepo"
-```
-
-## Global Flag
-
-- `--debug` / `-d` — Enable debug logging to stderr
-
-## Development
-
-```bash
-cargo build          # Build
-cargo test           # Run tests
-cargo check          # Type-check
-cargo fmt            # Format
-cargo clippy         # Lint
 ```

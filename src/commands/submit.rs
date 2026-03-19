@@ -122,7 +122,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .config
         .upstream
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))
+        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))
         .cloned()?;
 
     let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin").to_string();

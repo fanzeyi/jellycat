@@ -75,7 +75,7 @@ pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
         let upstream = config
             .upstream
             .as_ref()
-            .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jellycat init'."))?;
+            .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))?;
 
         let pr_nums: Vec<u32> = live_prs.iter().map(|(_, pr)| **pr).collect();
         let states = gh.pr_states(upstream, &pr_nums)?;

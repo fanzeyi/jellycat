@@ -13,7 +13,13 @@ This is a Jellyfish inspired CLI tool for managing [Jujutsu (`jj`)](https://gith
 ## Installation
 
 ```bash
-cargo install --path .
+cargo install jellycat
+```
+
+Or if you want the latest,
+
+```
+cargo install --git https://github.com/fanzeyi/jellycat.git
 ```
 
 ## Quick Start

@@ -383,3 +383,89 @@ impl Jj {
         Ok(())
     }
 }
+
+/// Extracts `owner/repo` from a GitHub remote URL.
+/// Returns `None` for non-GitHub URLs.
+pub fn parse_github_owner_repo(url: &str) -> Option<String> {
+    let path = if let Some(rest) = url.strip_prefix("https://github.com/") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("ssh://git@github.com/") {
+        rest
+    } else if let Some(rest) = url.strip_prefix("git@github.com:") {
+        rest
+    } else {
+        return None;
+    };
+
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let path = path.trim_end_matches('/');
+
+    // Validate owner/repo format
+    let parts: Vec<&str> = path.splitn(3, '/').collect();
+    if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        Some(format!("{}/{}", parts[0], parts[1]))
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_github_https() {
+        assert_eq!(
+            parse_github_owner_repo("https://github.com/owner/repo.git"),
+            Some("owner/repo".to_string())
+        );
+        assert_eq!(
+            parse_github_owner_repo("https://github.com/owner/repo"),
+            Some("owner/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_github_ssh() {
+        assert_eq!(
+            parse_github_owner_repo("git@github.com:owner/repo.git"),
+            Some("owner/repo".to_string())
+        );
+        assert_eq!(
+            parse_github_owner_repo("git@github.com:owner/repo"),
+            Some("owner/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_github_ssh_protocol() {
+        assert_eq!(
+            parse_github_owner_repo("ssh://git@github.com/owner/repo.git"),
+            Some("owner/repo".to_string())
+        );
+        assert_eq!(
+            parse_github_owner_repo("ssh://git@github.com/owner/repo"),
+            Some("owner/repo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_non_github() {
+        assert_eq!(
+            parse_github_owner_repo("https://gitlab.com/owner/repo.git"),
+            None
+        );
+        assert_eq!(
+            parse_github_owner_repo("git@bitbucket.org:owner/repo.git"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_trailing_slash() {
+        assert_eq!(
+            parse_github_owner_repo("https://github.com/owner/repo/"),
+            Some("owner/repo".to_string())
+        );
+    }
+}

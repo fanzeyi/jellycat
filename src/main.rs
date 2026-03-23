@@ -75,6 +75,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Status(args) => jellycat::commands::status::run(args, &config),
         Commands::Tidy(args) => jellycat::commands::tidy::run(args, &config),
         Commands::Get(args) => jellycat::commands::get::run(args, &config),
-        Commands::Init(_) | Commands::Link(_) | Commands::Unlink(_) | Commands::Completions { .. } => unreachable!(),
+        Commands::Init(_)
+        | Commands::Link(_)
+        | Commands::Unlink(_)
+        | Commands::Completions { .. } => unreachable!(),
     }
 }

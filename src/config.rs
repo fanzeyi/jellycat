@@ -3,6 +3,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub const DEFAULT_BOOKMARK_PREFIX: &str = "jellycat/";
+
 #[derive(Debug, Default)]
 pub struct Config {
     /// `owner/repo` string for the upstream repository
@@ -18,6 +20,14 @@ pub struct Config {
     /// Old config keys that were found and should trigger deprecation warnings.
     /// Vec of (old_key, new_key) pairs.
     pub deprecated_keys: Vec<(&'static str, &'static str)>,
+}
+
+impl Config {
+    pub fn bookmark_prefix(&self) -> &str {
+        self.bookmark_prefix
+            .as_deref()
+            .unwrap_or(DEFAULT_BOOKMARK_PREFIX)
+    }
 }
 
 pub fn load(repo_path: &Path) -> Result<Config> {

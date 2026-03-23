@@ -122,11 +122,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .log_reversed(&revset, "json(self) ++ \"\\n\"")
         .context("jj log failed")?;
 
-    let bookmark_prefix = ctx
-        .config
-        .bookmark_prefix
-        .clone()
-        .unwrap_or_else(|| "jellycat/".to_string());
+    let bookmark_prefix = ctx.config.bookmark_prefix().to_string();
 
     let upstream_repo = ctx
         .config
@@ -135,7 +131,12 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))
         .cloned()?;
 
-    let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin").to_string();
+    let origin_remote = ctx
+        .config
+        .origin
+        .as_ref()
+        .ok_or_else(|| anyhow!("jellycat.origin not configured. Run 'jc init'."))
+        .cloned()?;
 
     let commits: Vec<JjLogCommit> = output_str
         .lines()

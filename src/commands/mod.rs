@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use clap_complete::Shell;
 
 pub mod get;
 pub mod init;
@@ -24,4 +25,9 @@ pub enum Commands {
     Tidy(tidy::TidyArgs),
     /// Fetch a pull request branch from GitHub
     Get(get::GetArgs),
+    /// Generate shell completions
+    Completions {
+        /// The shell to generate completions for
+        shell: Shell,
+    },
 }

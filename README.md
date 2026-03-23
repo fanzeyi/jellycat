@@ -22,6 +22,19 @@ Or if you want the latest,
 cargo install --git https://github.com/fanzeyi/jellycat.git
 ```
 
+### Shell Completions
+
+```bash
+# Bash
+jc completions bash > ~/.local/share/bash-completion/completions/jc
+
+# Zsh
+jc completions zsh > ~/.zfunc/_jc
+
+# Fish
+jc completions fish > ~/.config/fish/completions/jc.fish
+```
+
 ## Quick Start
 
 ```bash

@@ -1,5 +1,6 @@
 use anyhow::Context;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use jellycat::commands::Commands;
 use jellycat::config;
 use jellycat::repo;
@@ -40,6 +41,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Unlink(args) => {
             return jellycat::commands::unlink::run(args);
         }
+        Commands::Completions { shell } => {
+            generate(*shell, &mut Cli::command(), "jc", &mut std::io::stdout());
+            return Ok(());
+        }
         _ => {} // Continue for commands that need config
     }
 
@@ -70,6 +75,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Status(args) => jellycat::commands::status::run(args, &config),
         Commands::Tidy(args) => jellycat::commands::tidy::run(args, &config),
         Commands::Get(args) => jellycat::commands::get::run(args, &config),
-        Commands::Init(_) | Commands::Link(_) | Commands::Unlink(_) => unreachable!(),
+        Commands::Init(_) | Commands::Link(_) | Commands::Unlink(_) | Commands::Completions { .. } => unreachable!(),
     }
 }

@@ -112,9 +112,10 @@ Configuration is stored in jj's repo-local config under the `jellycat.*` namespa
 
 | Key                        | Description                                         |
 | -------------------------- | --------------------------------------------------- |
-| `jellycat.upstream`        | Target GitHub repo (`owner/repo`)                   |
+| `jellycat.upstream`        | Git remote name for the upstream repository         |
+| `jellycat.upstream_repo`   | Upstream GitHub repo (`owner/repo`)                 |
 | `jellycat.origin`          | Git remote name to push to                          |
-| `jellycat.head_repo`       | Fork repo for cross-fork PRs (`owner/repo`)         |
+| `jellycat.origin_repo`     | Fork repo for cross-fork PRs (`owner/repo`)         |
 | `jellycat.github_user`     | GitHub username for per-user token auth             |
 | `jellycat.bookmark_prefix` | Prefix for created bookmarks (default: `jellycat/`) |
 | `jellycat.prs.<change-id>` | PR number linked to a change ID                     |
@@ -122,5 +123,5 @@ Configuration is stored in jj's repo-local config under the `jellycat.*` namespa
 Set config values with:
 
 ```bash
-jj config set --repo jellycat.head_repo "myuser/myrepo"
+jj config set --repo jellycat.origin_repo "myuser/myrepo"
 ```

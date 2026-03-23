@@ -1,5 +1,6 @@
 use clap::Subcommand;
 
+pub mod get;
 pub mod init;
 pub mod link;
 pub mod status;
@@ -21,4 +22,6 @@ pub enum Commands {
     Unlink(unlink::UnlinkArgs),
     /// Clean up merged bookmarks and their remote tracking branches
     Tidy(tidy::TidyArgs),
+    /// Fetch a pull request branch from GitHub
+    Get(get::GetArgs),
 }

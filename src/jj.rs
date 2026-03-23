@@ -299,6 +299,69 @@ impl Jj {
         Ok(())
     }
 
+    fn cmd_wc(&self) -> Command {
+        let mut cmd = Command::new("jj");
+        cmd.arg("-R").arg(&self.repo_root);
+        cmd
+    }
+
+    pub fn git_import(&self) -> Result<()> {
+        let mut cmd = self.cmd();
+        cmd.arg("git").arg("import");
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj git import failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn new_commit(&self, revision: &str) -> Result<()> {
+        let mut cmd = self.cmd_wc();
+        cmd.arg("new").arg(revision);
+        self.log_cmd(&cmd);
+        if !self.runner.run_status(&mut cmd)? {
+            return Err(anyhow!("jj new failed"));
+        }
+        Ok(())
+    }
+
+    pub fn rebase(&self, branch: &str, destination: &str) -> Result<()> {
+        let mut cmd = self.cmd_wc();
+        cmd.arg("rebase")
+            .arg("-b")
+            .arg(branch)
+            .arg("-d")
+            .arg(destination);
+        self.log_cmd(&cmd);
+        if !self.runner.run_status(&mut cmd)? {
+            return Err(anyhow!("jj rebase failed"));
+        }
+        Ok(())
+    }
+
+    pub fn find_upstream_remote(&self, upstream_repo: &str) -> Result<String> {
+        let output = self.git_remote_list()?;
+        for line in output.lines() {
+            if let Some((name, url)) = line.split_once(' ') {
+                if url.contains(upstream_repo) {
+                    return Ok(name.to_string());
+                }
+            }
+        }
+        Err(anyhow!(
+            "No remote found matching upstream repo '{}'",
+            upstream_repo
+        ))
+    }
+
+    pub fn repo_root(&self) -> &std::path::Path {
+        &self.repo_root
+    }
+
     pub fn git_push_bookmarks(
         &self,
         remote: &str,

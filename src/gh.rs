@@ -6,6 +6,13 @@ use std::process::Command;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
+pub struct GhAuthAccount {
+    pub login: String,
+    pub host: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct PrInfo {
     pub state: String,
     pub comment_count: u32,
@@ -119,6 +126,46 @@ impl Gh {
             .and_then(|hosts| hosts.first())
             .cloned()
             .ok_or_else(|| anyhow!("No github.com authentication found. Run 'gh auth login'."))
+    }
+
+    pub fn list_accounts(&self) -> Result<Vec<GhAuthAccount>> {
+        let mut cmd = self.cmd();
+        cmd.args(["auth", "status", "--json", "hosts"]);
+        self.log_cmd(&cmd);
+        let output = self
+            .runner
+            .run_output(&mut cmd)
+            .context("Failed to execute 'gh auth status'")?;
+        tracing::debug!("gh exited with status={}", output.status);
+        if !output.status.success() {
+            return Err(anyhow!(
+                "gh auth status failed. Make sure you are logged in: 'gh auth login'"
+            ));
+        }
+
+        #[derive(Deserialize)]
+        struct Account {
+            login: String,
+            active: bool,
+        }
+        #[derive(Deserialize)]
+        struct AuthStatus {
+            hosts: HashMap<String, Vec<Account>>,
+        }
+
+        let status: AuthStatus = serde_json::from_slice(&output.stdout)?;
+        let accounts: Vec<GhAuthAccount> = status
+            .hosts
+            .into_iter()
+            .flat_map(|(host, accts)| {
+                accts.into_iter().map(move |a| GhAuthAccount {
+                    login: a.login,
+                    host: host.clone(),
+                    active: a.active,
+                })
+            })
+            .collect();
+        Ok(accounts)
     }
 
     pub fn pr_view_head_ref(&self, upstream: &str, pr_num: u32) -> Result<String> {

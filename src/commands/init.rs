@@ -1,10 +1,12 @@
 use crate::config;
-use crate::jj::{self, Jj};
+use crate::gh::Gh;
+use crate::jj::{self, DefaultRunner, Jj};
 use crate::repo;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use console::style;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
+use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct InitArgs {
@@ -92,6 +94,59 @@ fn validate_owner_repo(input: &str) -> std::result::Result<(), String> {
     }
 }
 
+/// Detect multiple GitHub accounts and prompt the user to select one.
+/// Returns `Some(login)` if a selection was made, `None` otherwise.
+fn select_github_account() -> Result<Option<String>> {
+    let gh = Gh::new(Arc::new(DefaultRunner));
+    let accounts = match gh.list_accounts() {
+        Ok(a) => a,
+        Err(_) => {
+            println!(
+                "{}",
+                style("Warning: could not detect GitHub accounts. Run 'gh auth login' to authenticate.")
+                    .yellow()
+            );
+            return Ok(None);
+        }
+    };
+
+    if accounts.len() <= 1 {
+        if accounts.is_empty() {
+            println!(
+                "{}",
+                style("Warning: no GitHub accounts found. Run 'gh auth login' to authenticate.")
+                    .yellow()
+            );
+        }
+        return Ok(None);
+    }
+
+    let all_same_host = accounts.iter().all(|a| a.host == accounts[0].host);
+
+    let items: Vec<String> = accounts
+        .iter()
+        .map(|a| {
+            if all_same_host {
+                a.login.clone()
+            } else {
+                format!("{} ({})", a.login, a.host)
+            }
+        })
+        .collect();
+
+    let default = accounts.iter().position(|a| a.active).unwrap_or(0);
+
+    let theme = ColorfulTheme::default();
+    let selected = Select::with_theme(&theme)
+        .with_prompt("Select the GitHub account to use")
+        .items(&items)
+        .default(default)
+        .interact()
+        .context("Selection cancelled")?;
+
+    Ok(Some(accounts[selected].login.clone()))
+}
+
 pub fn run(args: &InitArgs) -> Result<()> {
     let repo_root = repo::find_root().ok_or_else(|| {
         anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
@@ -137,6 +192,9 @@ pub fn run(args: &InitArgs) -> Result<()> {
     let (origin_remote, origin_repo) =
         select_remote_and_repo(&remotes, "Select the origin remote", "origin")?;
 
+    // GitHub account selection
+    let selected_user = select_github_account()?;
+
     // Save all four config keys
     config::save(&repo_root, "jellycat.upstream", &upstream_remote)
         .context("Error saving upstream remote")?;
@@ -146,6 +204,10 @@ pub fn run(args: &InitArgs) -> Result<()> {
         .context("Error saving origin remote")?;
     config::save(&repo_root, "jellycat.origin_repo", &origin_repo)
         .context("Error saving origin repo")?;
+    if let Some(ref user) = selected_user {
+        config::save(&repo_root, "jellycat.github_user", user)
+            .context("Error saving github_user")?;
+    }
 
     println!();
     println!(
@@ -153,17 +215,32 @@ pub fn run(args: &InitArgs) -> Result<()> {
         style("jellycat configured successfully!").green().bold()
     );
     println!(
-        "  {} {}  {}",
-        style("upstream remote:").bold(),
+        "  {} {}",
+        style("upstream remote:     ").bold(),
         style(&upstream_remote).cyan(),
-        style(&upstream_repo).dim()
     );
     println!(
-        "  {} {}  {}",
-        style("origin remote:  ").bold(),
-        style(&origin_remote).cyan(),
-        style(&origin_repo).dim()
+        "  {} {}",
+        style("upstream GitHub repo:").bold(),
+        style(&upstream_repo).cyan()
     );
+    println!(
+        "  {} {}",
+        style("origin remote:       ").bold(),
+        style(&origin_remote).cyan(),
+    );
+    println!(
+        "  {} {}",
+        style("origin GitHub repo:  ").bold(),
+        style(&origin_repo).cyan()
+    );
+    if let Some(ref user) = selected_user {
+        println!(
+            "  {} {}",
+            style("GitHub user:         ").bold(),
+            style(user).cyan()
+        );
+    }
     println!("");
 
     Ok(())

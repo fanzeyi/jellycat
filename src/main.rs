@@ -41,6 +41,10 @@ fn main() -> anyhow::Result<()> {
         Commands::Unlink(args) => {
             return jellycat::commands::unlink::run(args);
         }
+        Commands::Skills => {
+            print!("{}", include_str!("../SKILLS.md"));
+            return Ok(());
+        }
         Commands::Completions { shell } => {
             generate(*shell, &mut Cli::command(), "jc", &mut std::io::stdout());
             return Ok(());
@@ -78,6 +82,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Init(_)
         | Commands::Link(_)
         | Commands::Unlink(_)
+        | Commands::Skills
         | Commands::Completions { .. } => unreachable!(),
     }
 }

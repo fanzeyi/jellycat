@@ -106,6 +106,15 @@ Clean up after merged, closed, or abandoned work:
 - Abandons changesets linked to merged/closed PRs
 - Removes all corresponding config entries
 
+## AI Assistant Integration
+
+Teach your AI coding assistant (Claude Code, Cursor, etc.) how to use `jc`:
+
+```bash
+jc skills >> ~/.claude/CLAUDE.md       # Claude Code
+jc skills >> .cursor/rules/jc.md       # Cursor
+```
+
 ## Configuration
 
 Configuration is stored in jj's repo-local config under the `jellycat.*` namespace. Most keys are set automatically by `init` and `submit`.

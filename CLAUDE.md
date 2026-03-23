@@ -26,7 +26,9 @@ There is a test repository at `/Users/zeyi/Code/test-fork` (a fork of `zerayrice
 
 - **`src/jj.rs`** — Centralized `Jj` client wrapping all `jj` binary interactions. Always passes `-R <repo_root>` to ensure commands target the right repo. The `CommandRunner` trait (`run_output`, `run_status`) abstracts process execution for testability; `DefaultRunner` is the real implementation used in production.
 
-- **`src/commands/`** — Each subcommand (`init`, `submit`, `link`, `unlink`, `status`) lives in its own module with a `run()` function. The `Commands` enum in `mod.rs` wires them to clap.
+- **`src/gh.rs`** — `Gh` client wrapping all GitHub CLI (`gh`) interactions. Uses `CommandRunner` like `Jj` for testability. Supports per-user token auth via `GH_TOKEN` env var. The `JELLYCAT_GH_BINARY` env var overrides the `gh` binary path.
+
+- **`src/commands/`** — Each subcommand (`init`, `submit`, `link`, `unlink`, `status`, `tidy`, `get`) lives in its own module with a `run()` function. The `Commands` enum in `mod.rs` wires them to clap.
 
 - **`src/config.rs`** — Reads/writes jellycat config stored in jj's repo-local config under the `jellycat.*` namespace (`jellycat.upstream`, `jellycat.origin`).
 
@@ -42,4 +44,4 @@ There is a test repository at `/Users/zeyi/Code/test-fork` (a fork of `zerayrice
 
 ### Testing Pattern
 
-Integration tests in `tests/submit_test.rs` use `mockall` to mock `CommandRunner`, `tempfile` for temporary repos, and `assert_cmd`/`predicates` for CLI assertions. Mock the `CommandRunner` trait to test command logic without invoking real `jj` or `gh` binaries.
+Integration tests in `tests/submit_test.rs` and `tests/stack_navigation_test.rs` use `mockall` to mock `CommandRunner`, `tempfile` for temporary repos, and `assert_cmd`/`predicates` for CLI assertions. Mock the `CommandRunner` trait to test command logic without invoking real `jj` or `gh` binaries.

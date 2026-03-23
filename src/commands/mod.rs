@@ -25,6 +25,8 @@ pub enum Commands {
     Tidy(tidy::TidyArgs),
     /// Fetch a pull request branch from GitHub
     Get(get::GetArgs),
+    /// Print AI assistant skills reference for teaching AI tools to use jc
+    Skills,
     /// Generate shell completions
     Completions {
         /// The shell to generate completions for

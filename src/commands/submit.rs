@@ -14,8 +14,11 @@ use std::time::Duration;
 #[derive(Args, Debug)]
 pub struct SubmitArgs {
     /// The revset to submit
-    #[arg(short = 'r', long = "revset", default_value = "@")]
-    pub revset: String,
+    #[arg(short = 'r', long = "revset")]
+    pub revset: Option<String>,
+
+    #[arg(short, long = "stack")]
+    pub stack: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -107,8 +110,16 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     let jj = Arc::new(Jj::with_runner(repo_root, Arc::clone(&ctx.runner)));
     let gh = Arc::new(gh);
 
+    let revset = if let Some(revset) = &args.revset.as_deref() {
+        revset
+    } else if args.stack {
+        "trunk()..@"
+    } else {
+        "@"
+    };
+
     let output_str = jj
-        .log_reversed(&args.revset, "json(self) ++ \"\\n\"")
+        .log_reversed(&revset, "json(self) ++ \"\\n\"")
         .context("jj log failed")?;
 
     let bookmark_prefix = ctx
@@ -143,7 +154,12 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     // Track PR numbers for commits, keyed by change_id.
     let mut pr_map: HashMap<String, u32> = commits
         .iter()
-        .filter_map(|c| ctx.config.prs.get(&c.change_id).map(|&n| (c.change_id.clone(), n)))
+        .filter_map(|c| {
+            ctx.config
+                .prs
+                .get(&c.change_id)
+                .map(|&n| (c.change_id.clone(), n))
+        })
         .collect();
 
     let total = commits.len();
@@ -307,7 +323,10 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let pb_clone = pb.clone();
                 std::thread::spawn(move || -> Result<()> {
                     let pr_num = *pr_map.get(&change_id).ok_or_else(|| {
-                        anyhow!("No PR number for commit {}", &change_id[..12.min(change_id.len())])
+                        anyhow!(
+                            "No PR number for commit {}",
+                            &change_id[..12.min(change_id.len())]
+                        )
                     })?;
                     let stack = get_stack(&jj, &change_id, &pr_map)?;
                     let graph = generate_stack_graph(&stack, &change_id, &upstream);
@@ -328,9 +347,13 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     );
                     // Nav: always « prev · review · next » with review in the middle.
                     let mut nav = Vec::new();
-                    if let Some(prev) = graph.nav_prev { nav.push(prev); }
+                    if let Some(prev) = graph.nav_prev {
+                        nav.push(prev);
+                    }
                     nav.push(review_link);
-                    if let Some(next) = graph.nav_next { nav.push(next); }
+                    if let Some(next) = graph.nav_next {
+                        nav.push(next);
+                    }
                     let nav_line = nav.join(" · ");
 
                     let prefix = if graph.stack_md.is_empty() {
@@ -403,11 +426,7 @@ fn commit_body(description: &str) -> String {
     }
 }
 
-fn get_stack(
-    jj: &Jj,
-    change_id: &str,
-    pr_map: &HashMap<String, u32>,
-) -> Result<Vec<StackCommit>> {
+fn get_stack(jj: &Jj, change_id: &str, pr_map: &HashMap<String, u32>) -> Result<Vec<StackCommit>> {
     jj.get_stack(change_id)
         .context("Failed to get stack")?
         .iter()
@@ -439,8 +458,16 @@ fn generate_stack_graph(
     };
 
     // Adjacent PR numbers for prev/next navigation.
-    let prev_pr = if idx > 0 { stack[idx - 1].pr_number } else { None };
-    let next_pr = if idx < stack.len() - 1 { stack[idx + 1].pr_number } else { None };
+    let prev_pr = if idx > 0 {
+        stack[idx - 1].pr_number
+    } else {
+        None
+    };
+    let next_pr = if idx < stack.len() - 1 {
+        stack[idx + 1].pr_number
+    } else {
+        None
+    };
 
     // Review-diff suffix: single commit → changes/<sha>, multi-commit PR → changes/<base>..<head>.
     let current_pr_num = stack[idx].pr_number;
@@ -494,10 +521,16 @@ fn generate_stack_graph(
     StackGraph {
         stack_md,
         nav_prev: prev_pr.map(|p| {
-            format!("[« PR #{}](https://github.com/{}/pull/{})", p, upstream_repo, p)
+            format!(
+                "[« PR #{}](https://github.com/{}/pull/{})",
+                p, upstream_repo, p
+            )
         }),
         nav_next: next_pr.map(|n| {
-            format!("[PR #{} »](https://github.com/{}/pull/{})", n, upstream_repo, n)
+            format!(
+                "[PR #{} »](https://github.com/{}/pull/{})",
+                n, upstream_repo, n
+            )
         }),
         review_suffix,
     }

@@ -21,7 +21,7 @@ pub fn run(args: &InitArgs) -> Result<()> {
 
     let config = config::load(&repo_root).context("Error loading config")?;
 
-    if config.upstream.is_some() && config.origin.is_some() {
+    if config.upstream_repo.is_some() && config.origin.is_some() {
         if !args.force {
             println!(
                 "jellycat upstream and origin are already configured. Use --force to reconfigure."
@@ -32,7 +32,7 @@ pub fn run(args: &InitArgs) -> Result<()> {
         }
     }
 
-    if config.upstream.is_none() || args.force {
+    if config.upstream_repo.is_none() || args.force {
         println!("Configuring jellycat upstream.");
         print!("Please enter the upstream repo (e.g., owner/repo): ");
         io::stdout().flush().unwrap();
@@ -66,31 +66,32 @@ pub fn run(args: &InitArgs) -> Result<()> {
             ));
         }
 
-        config::save(&repo_root, "jellycat.upstream", &owner_repo)
+        config::save(&repo_root, "jellycat.upstream_repo", &owner_repo)
             .context("Error saving config")?;
 
         println!("Upstream repo configured successfully as: {}", owner_repo);
     }
 
+    // Get remotes list (needed for both origin and upstream remote selection)
+    let remotes_str = jj.git_remote_list().context("Error listing git remotes")?;
+
+    let remotes: Vec<(String, String)> = remotes_str
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let name = parts.next()?.to_string();
+            let url = parts.next()?.to_string();
+            Some((name, url))
+        })
+        .collect();
+
+    if remotes.is_empty() {
+        return Err(anyhow!(
+            "No git remotes found. Please add a remote using 'jj git remote add'."
+        ));
+    }
+
     if config.origin.is_none() || args.force {
-        let remotes_str = jj.git_remote_list().context("Error listing git remotes")?;
-
-        let remotes: Vec<(String, String)> = remotes_str
-            .lines()
-            .filter_map(|line| {
-                let mut parts = line.split_whitespace();
-                let name = parts.next()?.to_string();
-                let url = parts.next()?.to_string();
-                Some((name, url))
-            })
-            .collect();
-
-        if remotes.is_empty() {
-            return Err(anyhow!(
-                "No git remotes found. Please add a remote using 'jj git remote add'."
-            ));
-        }
-
         println!("\nAvailable git remotes:");
         for (i, (name, url)) in remotes.iter().enumerate() {
             println!("{}: {} ({})", i + 1, name, url);
@@ -117,6 +118,40 @@ pub fn run(args: &InitArgs) -> Result<()> {
 
         println!(
             "Origin remote configured successfully as: {}",
+            selected_remote_name
+        );
+    }
+
+    if config.upstream.is_none() || args.force {
+        println!("\nAvailable git remotes:");
+        for (i, (name, url)) in remotes.iter().enumerate() {
+            println!("{}: {} ({})", i + 1, name, url);
+        }
+
+        print!(
+            "Select a remote for the upstream repo [1-{}]: ",
+            remotes.len()
+        );
+        io::stdout().flush().unwrap();
+
+        let mut selection = String::new();
+        io::stdin()
+            .read_line(&mut selection)
+            .context("Failed to read line")?;
+        let selection: usize = match selection.trim().parse() {
+            Ok(n) if n > 0 && n <= remotes.len() => n,
+            _ => {
+                return Err(anyhow!("Invalid selection."));
+            }
+        };
+
+        let (selected_remote_name, _) = &remotes[selection - 1];
+
+        config::save(&repo_root, "jellycat.upstream", selected_remote_name)
+            .context("Error saving config")?;
+
+        println!(
+            "Upstream remote configured successfully as: {}",
             selected_remote_name
         );
     }

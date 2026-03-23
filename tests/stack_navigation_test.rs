@@ -142,7 +142,13 @@ fn setup_repo(base: &Path) -> std::path::PathBuf {
     // Jellycat config (what `jellycat init` would write)
     jj(
         &repo,
-        &["config", "set", "--repo", "jellycat.upstream", "owner/repo"],
+        &[
+            "config",
+            "set",
+            "--repo",
+            "jellycat.upstream_repo",
+            "owner/repo",
+        ],
     );
     jj(
         &repo,

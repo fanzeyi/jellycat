@@ -130,9 +130,9 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
 
     let upstream_repo = ctx
         .config
-        .upstream
+        .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))
+        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))
         .cloned()?;
 
     let origin_remote = ctx.config.origin.as_deref().unwrap_or("origin").to_string();
@@ -248,7 +248,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         let default_branch = gh.default_branch(&upstream_repo)?;
         let head_owner = ctx
             .config
-            .head_repo
+            .origin_repo
             .as_deref()
             .and_then(|r| r.split('/').next())
             .unwrap_or(&auth.login)
@@ -265,7 +265,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let description = p.commit.description.clone();
                 let head = format!("{}:{}", head_owner, &bookmark_name);
                 let base = default_branch.clone();
-                let head_repo = ctx.config.head_repo.clone();
+                let head_repo = ctx.config.origin_repo.clone();
                 let title = description
                     .lines()
                     .next()

@@ -43,9 +43,9 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
     let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
 
     let upstream = config
-        .upstream
+        .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))?;
+        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
 
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");

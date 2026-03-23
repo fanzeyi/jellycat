@@ -31,12 +31,14 @@ fn test_submit_auth_failure() {
     });
 
     let config = Config {
-        upstream: Some("owner/repo".to_string()),
+        upstream_repo: Some("owner/repo".to_string()),
+        upstream: None,
         origin: Some("origin".to_string()),
-        head_repo: None,
+        origin_repo: None,
         github_user: None,
         prs: HashMap::new(),
         bookmark_prefix: None,
+        deprecated_keys: vec![],
     };
 
     let ctx = SubmitContext {
@@ -197,12 +199,14 @@ fn test_submit_success_new_pr() {
         .returning(|_| Ok(true));
 
     let config = Config {
-        upstream: Some("owner/repo".to_string()),
+        upstream_repo: Some("owner/repo".to_string()),
+        upstream: None,
         origin: Some("origin".to_string()),
-        head_repo: None,
+        origin_repo: None,
         github_user: None,
         prs: HashMap::new(),
         bookmark_prefix: None,
+        deprecated_keys: vec![],
     };
 
     let ctx = SubmitContext {

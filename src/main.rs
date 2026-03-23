@@ -49,7 +49,17 @@ fn main() -> anyhow::Result<()> {
 
     let config = config::load(&repo_root).context("Error loading config")?;
 
-    if config.upstream.is_none() {
+    for (old_key, new_key) in &config.deprecated_keys {
+        eprintln!(
+            "warning: config key '{}' is deprecated, use '{}' instead",
+            old_key, new_key
+        );
+    }
+    if !config.deprecated_keys.is_empty() {
+        eprintln!("Run 'jc init --force' to reconfigure.");
+    }
+
+    if config.upstream_repo.is_none() {
         return Err(anyhow::anyhow!(
             "jellycat upstream not configured. Please run `jc init`."
         ));

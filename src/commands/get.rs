@@ -28,11 +28,15 @@ pub fn run(args: &GetArgs, config: &Config) -> Result<()> {
     let jj = Jj::with_runner(repo_root, Arc::new(DefaultRunner));
 
     let upstream_repo = config
-        .upstream
+        .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream not configured. Run 'jc init'."))?;
+        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
 
-    let remote_name = jj.find_upstream_remote(upstream_repo)?;
+    let remote_name = if let Some(ref name) = config.upstream {
+        name.clone()
+    } else {
+        jj.find_upstream_remote(upstream_repo)?
+    };
 
     let local_branch = format!("pr-{}", args.pr_number);
     let refspec = format!(

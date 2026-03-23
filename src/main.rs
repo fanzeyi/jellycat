@@ -1,8 +1,8 @@
+use anyhow::Context;
+use clap::Parser;
 use jellycat::commands::Commands;
 use jellycat::config;
 use jellycat::repo;
-use anyhow::Context;
-use clap::Parser;
 
 #[derive(Parser)]
 #[command(
@@ -43,13 +43,16 @@ fn main() -> anyhow::Result<()> {
         _ => {} // Continue for commands that need config
     }
 
-    let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let repo_root = repo::find_root().ok_or_else(|| {
+        anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
+    })?;
 
     let config = config::load(&repo_root).context("Error loading config")?;
 
     if config.upstream.is_none() {
-        return Err(anyhow::anyhow!("jellycat upstream not configured. Please run `jc init`."));
+        return Err(anyhow::anyhow!(
+            "jellycat upstream not configured. Please run `jc init`."
+        ));
     }
 
     match &cli.command {

@@ -130,12 +130,24 @@ fn setup_repo(base: &Path) -> std::path::PathBuf {
         .expect("jj not found");
     assert!(s.success(), "jj git init failed");
 
-    jj(&repo, &["git", "remote", "add", "origin", remote.to_str().unwrap()]);
+    jj(
+        &repo,
+        &["git", "remote", "add", "origin", remote.to_str().unwrap()],
+    );
     jj(&repo, &["config", "set", "--repo", "user.name", "Test"]);
-    jj(&repo, &["config", "set", "--repo", "user.email", "test@test.com"]);
+    jj(
+        &repo,
+        &["config", "set", "--repo", "user.email", "test@test.com"],
+    );
     // Jellycat config (what `jellycat init` would write)
-    jj(&repo, &["config", "set", "--repo", "jellycat.upstream", "owner/repo"]);
-    jj(&repo, &["config", "set", "--repo", "jellycat.origin", "origin"]);
+    jj(
+        &repo,
+        &["config", "set", "--repo", "jellycat.upstream", "owner/repo"],
+    );
+    jj(
+        &repo,
+        &["config", "set", "--repo", "jellycat.origin", "origin"],
+    );
 
     repo
 }
@@ -158,8 +170,8 @@ fn test_stack_pr_navigation_for_new_prs() {
     fs::set_permissions(&fake_gh, perms).unwrap();
 
     // Run jellycat as a subprocess — env vars are scoped to the child process.
-    // CARGO_BIN_EXE_jellycat is set by cargo to the path of the compiled binary.
-    Command::new(env!("CARGO_BIN_EXE_jellycat"))
+    // CARGO_BIN_EXE_jc is set by cargo to the path of the compiled binary.
+    Command::new(env!("CARGO_BIN_EXE_jc"))
         .current_dir(&repo)
         .env("JELLYCAT_GH_BINARY", &fake_gh)
         .env("JELLYCAT_GH_STATE_DIR", &state_dir)

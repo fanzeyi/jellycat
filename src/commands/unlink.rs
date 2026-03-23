@@ -22,8 +22,7 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
     let jj = Jj::new(repo_root.clone());
 
     // 1. Get the commit.
-    let commit =
-        repo::get_single_commit(&repo_root, &args.revset)?;
+    let commit = repo::get_single_commit(&repo_root, &args.revset)?;
 
     // 2. Check config for existing PR link.
     let cfg = config::load(&repo_root)?;
@@ -31,7 +30,10 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
 
     match (existing_pr, args.pr_number) {
         (None, _) => {
-            eprintln!("Warning: No PR found linked to changeset {}.", commit.change_id);
+            eprintln!(
+                "Warning: No PR found linked to changeset {}.",
+                commit.change_id
+            );
             return Ok(());
         }
         (Some(existing), Some(requested)) if existing != requested => {
@@ -55,10 +57,7 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
         );
     } else {
         let pr = existing_pr.unwrap();
-        println!(
-            "Unlinked PR #{} from changeset {}",
-            pr, commit.change_id
-        );
+        println!("Unlinked PR #{} from changeset {}", pr, commit.change_id);
     }
 
     Ok(())

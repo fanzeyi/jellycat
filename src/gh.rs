@@ -1,5 +1,5 @@
 use crate::jj::CommandRunner;
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
@@ -29,11 +29,17 @@ pub struct Gh {
 
 impl Gh {
     pub fn new(runner: Arc<dyn CommandRunner + Send + Sync>) -> Self {
-        Self { runner, token: None }
+        Self {
+            runner,
+            token: None,
+        }
     }
 
     pub fn with_token(runner: Arc<dyn CommandRunner + Send + Sync>, token: String) -> Self {
-        Self { runner, token: Some(token) }
+        Self {
+            runner,
+            token: Some(token),
+        }
     }
 
     /// Retrieves a token for `user` using the existing gh authentication.
@@ -96,7 +102,9 @@ impl Gh {
         let mut cmd = self.cmd();
         cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
         self.log_cmd(&cmd);
-        let output = self.runner.run_output(&mut cmd)
+        let output = self
+            .runner
+            .run_output(&mut cmd)
             .context("Failed to execute 'gh auth status'")?;
         tracing::debug!("gh exited with status={}", output.status);
         if !output.status.success() {
@@ -115,7 +123,15 @@ impl Gh {
 
     pub fn pr_view_head_ref(&self, upstream: &str, pr_num: u32) -> Result<String> {
         let mut cmd = self.cmd();
-        cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "headRefName"]);
+        cmd.args([
+            "pr",
+            "view",
+            &pr_num.to_string(),
+            "--repo",
+            upstream,
+            "--json",
+            "headRefName",
+        ]);
         self.log_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
@@ -128,7 +144,15 @@ impl Gh {
 
     pub fn pr_view_body(&self, upstream: &str, pr_num: u32) -> Result<String> {
         let mut cmd = self.cmd();
-        cmd.args(["pr", "view", &pr_num.to_string(), "--repo", upstream, "--json", "body"]);
+        cmd.args([
+            "pr",
+            "view",
+            &pr_num.to_string(),
+            "--repo",
+            upstream,
+            "--json",
+            "body",
+        ]);
         self.log_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
@@ -138,7 +162,15 @@ impl Gh {
 
     pub fn pr_edit_body(&self, upstream: &str, pr_num: u32, body: &str) -> Result<()> {
         let mut cmd = self.cmd();
-        cmd.args(["pr", "edit", &pr_num.to_string(), "--repo", upstream, "--body", body]);
+        cmd.args([
+            "pr",
+            "edit",
+            &pr_num.to_string(),
+            "--repo",
+            upstream,
+            "--body",
+            body,
+        ]);
         self.log_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
@@ -153,12 +185,21 @@ impl Gh {
 
     pub fn default_branch(&self, upstream: &str) -> Result<String> {
         let mut cmd = self.cmd();
-        cmd.args(["api", &format!("/repos/{}", upstream), "--jq", ".default_branch"]);
+        cmd.args([
+            "api",
+            &format!("/repos/{}", upstream),
+            "--jq",
+            ".default_branch",
+        ]);
         self.log_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
         if !output.status.success() {
-            return Err(anyhow!("Failed to get default branch for {}: {}", upstream, Self::api_error(&output)));
+            return Err(anyhow!(
+                "Failed to get default branch for {}: {}",
+                upstream,
+                Self::api_error(&output)
+            ));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
@@ -169,9 +210,12 @@ impl Gh {
             return Ok(HashMap::new());
         }
 
-        let (owner, name) = upstream
-            .split_once('/')
-            .ok_or_else(|| anyhow!("Invalid upstream format '{}', expected 'owner/repo'", upstream))?;
+        let (owner, name) = upstream.split_once('/').ok_or_else(|| {
+            anyhow!(
+                "Invalid upstream format '{}', expected 'owner/repo'",
+                upstream
+            )
+        })?;
 
         let aliases: Vec<String> = pr_nums
             .iter()
@@ -195,7 +239,10 @@ impl Gh {
         tracing::debug!("gh exited with status={}", output.status);
 
         if !output.status.success() {
-            return Err(anyhow!("gh api graphql failed: {}", Self::api_error(&output)));
+            return Err(anyhow!(
+                "gh api graphql failed: {}",
+                Self::api_error(&output)
+            ));
         }
 
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
@@ -208,10 +255,13 @@ impl Gh {
             if let Some(state) = pr_data["state"].as_str() {
                 let comments = pr_data["comments"]["totalCount"].as_u64().unwrap_or(0) as u32;
                 let reviews = pr_data["reviews"]["totalCount"].as_u64().unwrap_or(0) as u32;
-                result.insert(pr_num, PrInfo {
-                    state: state.to_string(),
-                    comment_count: comments + reviews,
-                });
+                result.insert(
+                    pr_num,
+                    PrInfo {
+                        state: state.to_string(),
+                        comment_count: comments + reviews,
+                    },
+                );
             }
         }
 
@@ -229,12 +279,18 @@ impl Gh {
     ) -> Result<(u32, String)> {
         let mut cmd = self.cmd();
         cmd.args([
-            "api", "--method", "POST",
+            "api",
+            "--method",
+            "POST",
             &format!("/repos/{}/pulls", upstream),
-            "-f", &format!("title={}", title),
-            "-f", &format!("body={}", body),
-            "-f", &format!("head={}", head),
-            "-f", &format!("base={}", base),
+            "-f",
+            &format!("title={}", title),
+            "-f",
+            &format!("body={}", body),
+            "-f",
+            &format!("head={}", head),
+            "-f",
+            &format!("base={}", base),
         ]);
         if let Some(repo) = head_repo {
             cmd.args(["-f", &format!("head_repo={}", repo)]);

@@ -124,9 +124,8 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
 
     let bookmark_prefix = ctx
         .config
-        .extra
-        .get("jellycat.bookmark_prefix")
-        .cloned()
+        .bookmark_prefix
+        .clone()
         .unwrap_or_else(|| "jellycat/".to_string());
 
     let upstream_repo = ctx

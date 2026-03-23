@@ -68,7 +68,9 @@ impl Jj {
 
     fn cmd(&self) -> Command {
         let mut cmd = Command::new("jj");
-        cmd.arg("-R").arg(&self.repo_root).arg("--ignore-working-copy");
+        cmd.arg("-R")
+            .arg(&self.repo_root)
+            .arg("--ignore-working-copy");
         cmd
     }
 
@@ -109,10 +111,7 @@ impl Jj {
 
     pub fn config_unset(&self, key: &str) -> Result<()> {
         let mut cmd = self.cmd();
-        cmd.arg("config")
-            .arg("unset")
-            .arg("--repo")
-            .arg(key);
+        cmd.arg("config").arg("unset").arg("--repo").arg(key);
         self.log_cmd(&cmd);
         if !self.runner.run_status(&mut cmd)? {
             return Err(anyhow!("jj config unset failed"));

@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::jj::{DefaultRunner, Jj};
 use crate::repo;
 use anyhow::{Result, anyhow};
@@ -83,6 +83,17 @@ pub fn run(args: &GetArgs, config: &Config) -> Result<()> {
         args.pr_number,
         local_branch,
     );
+
+    // Track the PR so it appears in `jc status`.
+    match repo::get_single_commit(jj.repo_root(), &local_branch) {
+        Ok(commit) => {
+            let key = format!("jellycat.prs.{}", commit.change_id);
+            config::save(jj.repo_root(), &key, &args.pr_number.to_string())?;
+        }
+        Err(e) => {
+            tracing::warn!("Could not track PR: {}", e);
+        }
+    }
 
     if args.rebase {
         jj.rebase(&local_branch, "@")?;

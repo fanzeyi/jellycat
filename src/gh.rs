@@ -16,6 +16,7 @@ pub struct GhAuthAccount {
 pub struct PrInfo {
     pub state: String,
     pub comment_count: u32,
+    pub failed_checks: u32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -27,6 +28,86 @@ pub struct GhAuth {
 #[derive(Deserialize, Debug)]
 struct GhAuthStatus {
     hosts: HashMap<String, Vec<GhAuth>>,
+}
+
+// -- GraphQL response types for pr_states() --
+
+#[derive(Deserialize)]
+struct PrStatesResponse {
+    data: PrStatesData,
+}
+
+#[derive(Deserialize)]
+struct PrStatesData {
+    repository: PrStatesRepository,
+}
+
+#[derive(Deserialize)]
+struct PrStatesRepository {
+    /// Dynamic PR aliases like "pr_42", "pr_99" etc.
+    #[serde(flatten)]
+    extra: HashMap<String, GqlPullRequest>,
+}
+
+#[derive(Deserialize)]
+struct GqlPullRequest {
+    state: String,
+    comments: GqlCount,
+    reviews: GqlCount,
+    commits: GqlCommitConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlCount {
+    #[serde(rename = "totalCount")]
+    total_count: u32,
+}
+
+#[derive(Deserialize)]
+struct GqlCommitConnection {
+    nodes: Vec<GqlCommitNode>,
+}
+
+#[derive(Deserialize)]
+struct GqlCommitNode {
+    commit: GqlCommit,
+}
+
+#[derive(Deserialize)]
+struct GqlCommit {
+    #[serde(rename = "statusCheckRollup")]
+    status_check_rollup: Option<GqlStatusCheckRollup>,
+}
+
+#[derive(Deserialize)]
+struct GqlStatusCheckRollup {
+    contexts: GqlCheckContextConnection,
+}
+
+#[derive(Deserialize)]
+struct GqlCheckContextConnection {
+    nodes: Vec<GqlCheckContext>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "__typename")]
+enum GqlCheckContext {
+    CheckRun { conclusion: Option<String> },
+    StatusContext { state: String },
+}
+
+impl GqlCheckContext {
+    fn is_failed(&self) -> bool {
+        match self {
+            GqlCheckContext::CheckRun { conclusion } => matches!(
+                conclusion.as_deref(),
+                Some("FAILURE" | "CANCELLED" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE")
+            ),
+            GqlCheckContext::StatusContext { state } => {
+                matches!(state.as_str(), "FAILURE" | "ERROR")
+            }
+        }
+    }
 }
 
 pub struct Gh {
@@ -267,8 +348,7 @@ impl Gh {
         let aliases: Vec<String> = pr_nums
             .iter()
             .map(|n| format!(
-                "pr_{}: pullRequest(number: {}) {{ state comments {{ totalCount }} reviews(first: 0) {{ totalCount }} }}",
-                n, n
+                "pr_{n}: pullRequest(number: {n}) {{ state comments {{ totalCount }} reviews(first: 0) {{ totalCount }} commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{ nodes {{ __typename ... on CheckRun {{ conclusion }} ... on StatusContext {{ state }} }} }} }} }} }} }} }}",
             ))
             .collect();
 
@@ -292,21 +372,27 @@ impl Gh {
             ));
         }
 
-        let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-        let repo_data = &data["data"]["repository"];
+        let response: PrStatesResponse = serde_json::from_slice(&output.stdout)?;
 
         let mut result = HashMap::new();
         for &pr_num in pr_nums {
             let alias = format!("pr_{}", pr_num);
-            let pr_data = &repo_data[&alias];
-            if let Some(state) = pr_data["state"].as_str() {
-                let comments = pr_data["comments"]["totalCount"].as_u64().unwrap_or(0) as u32;
-                let reviews = pr_data["reviews"]["totalCount"].as_u64().unwrap_or(0) as u32;
+            if let Some(pr_data) = response.data.repository.extra.get(&alias) {
+                let failed_checks = pr_data
+                    .commits
+                    .nodes
+                    .first()
+                    .and_then(|n| n.commit.status_check_rollup.as_ref())
+                    .map(|r| r.contexts.nodes.iter().filter(|c| c.is_failed()).count() as u32)
+                    .unwrap_or(0);
+
                 result.insert(
                     pr_num,
                     PrInfo {
-                        state: state.to_string(),
-                        comment_count: comments + reviews,
+                        state: pr_data.state.clone(),
+                        comment_count: pr_data.comments.total_count
+                            + pr_data.reviews.total_count,
+                        failed_checks,
                     },
                 );
             }

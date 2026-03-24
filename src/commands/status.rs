@@ -88,6 +88,7 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
         let info = states.get(pr_num);
         let state = info.map(|i| i.state.as_str()).unwrap_or("UNKNOWN");
         let comment_count = info.map(|i| i.comment_count).unwrap_or(0);
+        let failed_checks = info.map(|i| i.failed_checks).unwrap_or(0);
 
         let state_lower = state.to_lowercase();
         let state_styled = match state {
@@ -110,6 +111,12 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
             String::new()
         };
 
+        let checks_str = if failed_checks > 0 {
+            format!(" {}", style(format!("❌{}", failed_checks)).red())
+        } else {
+            String::new()
+        };
+
         let change_short = &change_id[..12.min(change_id.len())];
 
         if let Some(commit) = commits.get(change_id.as_str()) {
@@ -122,23 +129,25 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
             let timestamp = format_timestamp(&commit.author.timestamp);
 
             eprintln!(
-                "{}  {} {} {} {} {}{}",
+                "{}  {} {} {} {} {}{}{}",
                 style("○").bold(),
                 style(change_short).magenta(),
                 style(&timestamp).cyan(),
                 style(commit_short).blue(),
                 pr_link,
                 state_styled,
+                checks_str,
                 comments_str,
             );
             eprintln!("│  {}", title);
         } else {
             eprintln!(
-                "{}  {} {} {}{}",
+                "{}  {} {} {}{}{}",
                 style("○").bold(),
                 style(change_short).magenta(),
                 pr_link,
                 state_styled,
+                checks_str,
                 comments_str,
             );
             eprintln!("│  (commit not found)");

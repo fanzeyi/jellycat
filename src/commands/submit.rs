@@ -50,6 +50,14 @@ struct StackGraph {
     review_suffix: String,
 }
 
+fn plural(n: usize, singular: &str, plural: &str) -> String {
+    if n == 1 {
+        format!("{} {}", n, singular)
+    } else {
+        format!("{} {}", n, plural)
+    }
+}
+
 fn running_spinner_style() -> ProgressStyle {
     ProgressStyle::default_spinner()
         .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
@@ -167,7 +175,10 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     // Phase 1: Gather bookmark names (parallel I/O).
     // New commits compute a name locally; existing ones fetch the branch name from GitHub.
     let pb = new_spinner();
-    pb.set_message(format!("Gathering PR info for {} commit(s)...", total));
+    pb.set_message(format!(
+        "Gathering PR info for {}...",
+        plural(total, "commit", "commits")
+    ));
     let prepared: Vec<PreparedCommit> = {
         let handles: Vec<_> = commits
             .into_iter()
@@ -227,24 +238,25 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     // Phase 3: Batch push #1 — all bookmarks in one network operation.
     let pb = new_spinner();
     pb.set_message(format!(
-        "Pushing {} bookmark(s) to {}...",
-        total, origin_remote
+        "Pushing {} to {}...",
+        plural(total, "bookmark", "bookmarks"),
+        origin_remote
     ));
     let all_names: Vec<&str> = prepared.iter().map(|p| p.bookmark_name.as_str()).collect();
     {
-        let pb_clone = pb.clone();
-        jj.git_push_bookmarks(&origin_remote, &all_names, &mut |line| {
-            pb_clone.println(line)
-        })?;
+        jj.git_push_bookmarks(&origin_remote, &all_names, &mut |_line| {})?;
     }
     pb.set_style(success_spinner_style());
-    pb.finish_with_message(format!("Pushed {} bookmark(s)", total));
+    pb.finish_with_message(format!("Pushed {}", plural(total, "bookmark", "bookmarks")));
 
     // Phase 4: Create new PRs (parallel GitHub API).
     let new_count = prepared.iter().filter(|p| p.is_new).count();
     if new_count > 0 {
         let pb = new_spinner();
-        pb.set_message(format!("Creating {} new PR(s)...", new_count));
+        pb.set_message(format!(
+            "Creating {}...",
+            plural(new_count, "new PR", "new PRs")
+        ));
 
         let default_branch = gh.default_branch(&upstream_repo)?;
         let head_owner = ctx
@@ -272,7 +284,6 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     .next()
                     .unwrap_or("No description")
                     .to_string();
-                let pb_clone = pb.clone();
                 std::thread::spawn(move || -> Result<(String, u32, String)> {
                     let (pr_num, url) = gh.create_pr(
                         &upstream,
@@ -282,7 +293,6 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                         &base,
                         head_repo.as_deref(),
                     )?;
-                    pb_clone.println(format!("  PR #{} created: {}", pr_num, url));
                     Ok((change_id, pr_num, url))
                 })
             })
@@ -302,13 +312,19 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             return Err(e);
         }
         pb.set_style(success_spinner_style());
-        pb.finish_with_message(format!("Created {} new PR(s)", new_count));
+        pb.finish_with_message(format!(
+            "Created {}",
+            plural(new_count, "new PR", "new PRs")
+        ));
     }
 
     // Phase 5: Update all PR bodies (parallel GitHub API).
     // pr_map is now complete — existing + newly created.
     let pb = new_spinner();
-    pb.set_message(format!("Updating {} PR body(ies)...", total));
+    pb.set_message(format!(
+        "Updating {}...",
+        plural(total, "PR body", "PR bodies")
+    ));
     {
         let handles: Vec<_> = prepared
             .iter()
@@ -320,7 +336,6 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let description = p.commit.description.clone();
                 let upstream = upstream_repo.clone();
                 let is_new = p.is_new;
-                let pb_clone = pb.clone();
                 std::thread::spawn(move || -> Result<()> {
                     let pr_num = *pr_map.get(&change_id).ok_or_else(|| {
                         anyhow!(
@@ -364,7 +379,6 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     let body = format!("{}\n\n<!-- jellycat -->\n\n{}", prefix, user_content);
 
                     gh.pr_edit_body(&upstream, pr_num, &body)?;
-                    pb_clone.println(format!("  Updated body for PR #{}", pr_num));
                     Ok(())
                 })
             })
@@ -382,7 +396,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         }
     }
     pb.set_style(success_spinner_style());
-    pb.finish_with_message(format!("Updated {} PR body(ies)", total));
+    pb.finish_with_message(format!("Updated {}", plural(total, "PR body", "PR bodies")));
 
     // Save new PR mappings to jj config.
     for p in prepared.iter().filter(|p| p.is_new) {
@@ -392,7 +406,8 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     }
 
     // Summary
-    for p in &prepared {
+    eprintln!("\n");
+    for (i, p) in prepared.iter().rev().enumerate() {
         let pr_num = pr_map[&p.commit.change_id];
         let title = p
             .commit
@@ -402,17 +417,31 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             .unwrap_or("(no description)");
         let change_short = &p.commit.change_id[..12.min(p.commit.change_id.len())];
         let action = if p.is_new { "created" } else { "updated" };
-        eprintln!(
-            "{} [{}] {} — PR #{} {} (https://github.com/{}/pull/{})",
-            style("✓").green().bold(),
-            change_short,
-            title,
-            pr_num,
-            action,
-            upstream_repo,
-            pr_num
+        let pr_url = format!("https://github.com/{}/pull/{}", upstream_repo, pr_num);
+        let pr_link = format!(
+            "\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\",
+            pr_url,
+            style(format!("#{}", pr_num)).cyan().bold(),
         );
+        let action_styled = if p.is_new {
+            style(action).green().bold()
+        } else {
+            style(action).yellow()
+        };
+        let is_last = i == prepared.len() - 1;
+        let bullet = style("◆").cyan().bold();
+        let connector = if is_last { "┊" } else { "│" };
+        eprintln!(
+            "{} {} {} {} {}",
+            bullet,
+            style(change_short).magenta(),
+            action_styled,
+            pr_link,
+            style(&pr_url).dim(),
+        );
+        eprintln!("{} {}", style(connector).cyan(), title);
     }
+    eprintln!();
 
     Ok(())
 }

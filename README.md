@@ -58,6 +58,64 @@ https://github.com/user-attachments/assets/850dfd89-0370-4652-8559-9cd5c801d176
 
 <img width="1202" height="856" alt="Image" src="https://github.com/user-attachments/assets/9c6c54a8-9e47-4432-a407-4b560bbe053d" />
 
+## Integrations
+
+### Show PR Numbers in `jj log`
+
+Jellycat stores changeset to PR mapping in `jj config`. This allows you to look up the PR number of your changeset directly in JJ's templating language.
+
+However, dynamic config lookup is not supported in JJ until 0.40.0 (https://github.com/jj-vcs/jj/pull/9148).
+
+Add these template function to your JJ's `config.toml`
+
+```toml
+[template-aliases]
+'pr_id(commit)' = 'config("jellycat.prs." ++ commit.change_id())'
+'pr_url(commit)' = 'concat("https://github.com/", config("jellycat.upstream_repo").as_string(), "/pull/", pr_id(commit))'
+'format_pr(commit)' = '''
+if(pr_id(commit),
+  label("jellycat_pr_link",
+    hyperlink(pr_url(commit),
+      "#" ++ pr_id(commit),
+      concat("#", pr_id(commit), " ", pr_url(commit))
+    )
+  )
+)
+'''
+```
+
+You can customize the color of `format_pr()` with `colors.jellycat_pr_link`:
+
+```toml
+[colors]
+jellycat_pr_link = "yellow"
+```
+
+I elected to overwrite the builtin `format_short_commit_header(commit)` to show PR link in my `jj log` default output. This is not the best practice but I do not want to rewrite the entire `builtin_log_compact` template yet:
+
+```toml
+'format_short_commit_header(commit)' = '''
+separate(" ",
+  format_short_change_id_with_change_offset(commit),
+  format_short_signature(commit.author()),
+  format_timestamp(commit_timestamp(commit)),
+  commit.bookmarks(),
+  commit.tags(),
+  commit.working_copies(),
+  format_short_commit_id(commit.commit_id()),
+  format_commit_labels(commit),
+  format_pr(commit),
+  if(config("ui.show-cryptographic-signatures").as_boolean(),
+    format_short_cryptographic_signature(commit.signature())
+  ),
+)
+'''
+```
+
+Preview:
+
+<img width="679" height="297" alt="Image" src="https://github.com/user-attachments/assets/66f04852-3fb9-4802-a612-d63d66959bbc" />
+
 ## Commands
 
 ### `jc init [--force]`

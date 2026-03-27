@@ -65,6 +65,7 @@ pub fn run(args: &GetArgs, config: &Config) -> Result<()> {
         .arg("-C")
         .arg(repo_path)
         .arg("fetch")
+        .arg("--no-tags")
         .arg(&remote_url)
         .arg(&refspec)
         .status()

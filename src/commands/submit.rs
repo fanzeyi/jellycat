@@ -7,6 +7,7 @@ use clap::Args;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
+use rand::Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -191,11 +192,12 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     let (bookmark_name, is_new) = if let Some(pr_num) = pr_number {
                         (gh.pr_view_head_ref(&upstream, pr_num)?, false)
                     } else {
-                        let name = format!(
-                            "{}{}",
-                            prefix,
-                            &commit.change_id[..12.min(commit.change_id.len())]
-                        );
+                        let random_suffix: String = rand::rng()
+                            .sample_iter(rand::distr::Uniform::new_inclusive(b'a', b'z').unwrap())
+                            .take(12)
+                            .map(|b| b as char)
+                            .collect();
+                        let name = format!("{}{}", prefix, random_suffix);
                         (name, true)
                     };
                     Ok(PreparedCommit {

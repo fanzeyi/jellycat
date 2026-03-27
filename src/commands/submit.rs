@@ -320,6 +320,12 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         ));
     }
 
+    // Merge all known PR mappings from config so the stack graph can reference
+    // commits outside the current submit set (e.g. `jc submit -r b` in a-b-c).
+    for (change_id, &pr_num) in &ctx.config.prs {
+        pr_map.entry(change_id.clone()).or_insert(pr_num);
+    }
+
     // Phase 5: Update all PR bodies (parallel GitHub API).
     // pr_map is now complete — existing + newly created.
     let pb = new_spinner();

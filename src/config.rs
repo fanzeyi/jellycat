@@ -1,4 +1,5 @@
 use crate::jj::Jj;
+use crate::pr_store::PrStoreType;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,6 +20,8 @@ pub struct Config {
     /// When true, new PRs are created as drafts by default.
     pub draft: bool,
     pub prs: HashMap<String, u32>,
+    /// Which backend stores PR ↔ change-id mappings.
+    pub pr_store_type: PrStoreType,
     /// Old config keys that were found and should trigger deprecation warnings.
     /// Vec of (old_key, new_key) pairs.
     pub deprecated_keys: Vec<(&'static str, &'static str)>,
@@ -79,10 +82,11 @@ pub fn load(repo_path: &Path) -> Result<Config> {
                     config.draft = value == "true";
                 } else if key == "jellycat.bookmark_prefix" {
                     config.bookmark_prefix = Some(value.to_string());
-                } else if let Some(change_id) = key.strip_prefix("jellycat.prs.") {
-                    if let Ok(pr_num) = value.parse::<u32>() {
-                        config.prs.insert(change_id.to_string(), pr_num);
-                    }
+                } else if key == "jellycat.pr_store" {
+                    config.pr_store_type = match value {
+                        "bookmark" => PrStoreType::Bookmark,
+                        _ => PrStoreType::Config,
+                    };
                 }
             }
         }

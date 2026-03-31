@@ -3,7 +3,9 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use jellycat::commands::Commands;
 use jellycat::config;
+use jellycat::jj::Jj;
 use jellycat::repo;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(
@@ -35,12 +37,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Init(args) => {
             return jellycat::commands::init::run(args);
         }
-        Commands::Link(args) => {
-            return jellycat::commands::link::run(args);
-        }
-        Commands::Unlink(args) => {
-            return jellycat::commands::unlink::run(args);
-        }
         Commands::Skills => {
             print!("{}", include_str!("../SKILLS.md"));
             return Ok(());
@@ -56,7 +52,7 @@ fn main() -> anyhow::Result<()> {
         anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
     })?;
 
-    let config = config::load(&repo_root).context("Error loading config")?;
+    let mut config = config::load(&repo_root).context("Error loading config")?;
 
     for (old_key, new_key) in &config.deprecated_keys {
         eprintln!(
@@ -68,6 +64,22 @@ fn main() -> anyhow::Result<()> {
         eprintln!("Run 'jc init --force' to reconfigure.");
     }
 
+    // Construct the PR store and populate the prs cache.
+    let jj = Arc::new(Jj::new(repo_root.clone()));
+    let pr_store = jellycat::pr_store::create(&config.pr_store_type, Arc::clone(&jj));
+    config.prs = pr_store.list()?;
+
+    // Commands that don't require upstream_repo configured.
+    match &cli.command {
+        Commands::Link(args) => {
+            return jellycat::commands::link::run(args, &config, pr_store.as_ref());
+        }
+        Commands::Unlink(args) => {
+            return jellycat::commands::unlink::run(args, &config, pr_store.as_ref());
+        }
+        _ => {}
+    }
+
     if config.upstream_repo.is_none() {
         return Err(anyhow::anyhow!(
             "jellycat upstream not configured. Please run `jc init`."
@@ -75,10 +87,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     match &cli.command {
-        Commands::Submit(args) => jellycat::commands::submit::run(args, &config),
+        Commands::Submit(args) => jellycat::commands::submit::run(args, &config, pr_store.as_ref()),
         Commands::Status(args) => jellycat::commands::status::run(args, &config),
-        Commands::Tidy(args) => jellycat::commands::tidy::run(args, &config),
-        Commands::Get(args) => jellycat::commands::get::run(args, &config),
+        Commands::Tidy(args) => jellycat::commands::tidy::run(args, &config, pr_store.as_ref()),
+        Commands::Get(args) => jellycat::commands::get::run(args, &config, pr_store.as_ref()),
         Commands::Init(_)
         | Commands::Link(_)
         | Commands::Unlink(_)

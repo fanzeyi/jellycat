@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::gh::{Gh, GhAuth};
 use crate::jj::{CommandRunner, DefaultRunner, Jj};
+use crate::pr_store::PrStore;
 use crate::repo;
 use anyhow::{Context as _, Result, anyhow};
 use clap::Args;
@@ -87,12 +88,14 @@ fn new_spinner() -> ProgressBar {
 pub struct SubmitContext<'a> {
     pub config: &'a Config,
     pub runner: Arc<dyn CommandRunner + Send + Sync>,
+    pub pr_store: &'a dyn PrStore,
 }
 
-pub fn run(args: &SubmitArgs, config: &Config) -> Result<()> {
+pub fn run(args: &SubmitArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let ctx = SubmitContext {
         config,
         runner: Arc::new(DefaultRunner),
+        pr_store,
     };
     run_with_context(args, &ctx)
 }
@@ -412,11 +415,10 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     pb.set_style(success_spinner_style());
     pb.finish_with_message(format!("Updated {}", plural(total, "PR body", "PR bodies")));
 
-    // Save new PR mappings to jj config.
+    // Save new PR mappings via PrStore.
     for p in prepared.iter().filter(|p| p.is_new) {
         let pr_num = pr_map[&p.commit.change_id];
-        let key = format!("jellycat.prs.{}", p.commit.change_id);
-        jj.config_set(&key, &pr_num.to_string())?;
+        ctx.pr_store.set(&p.commit.change_id, pr_num)?;
     }
 
     // Summary

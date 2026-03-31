@@ -1,4 +1,5 @@
-use crate::config;
+use crate::config::Config;
+use crate::pr_store::PrStore;
 use crate::repo;
 use anyhow::{Context, Result, anyhow};
 use clap::Args;
@@ -17,7 +18,7 @@ pub struct LinkArgs {
     pub force: bool,
 }
 
-pub fn run(args: &LinkArgs) -> Result<()> {
+pub fn run(args: &LinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let repo_root = repo::find_root().ok_or_else(|| {
         anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
     })?;
@@ -26,9 +27,8 @@ pub fn run(args: &LinkArgs) -> Result<()> {
     let commit =
         repo::get_single_commit(&repo_root, &args.revset).context("Failed to get commit")?;
 
-    // 2. Check for existing PR link in config.
-    let cfg = config::load(&repo_root)?;
-    if let Some(&existing_pr) = cfg.prs.get(&commit.change_id) {
+    // 2. Check for existing PR link.
+    if let Some(&existing_pr) = config.prs.get(&commit.change_id) {
         if !args.force && existing_pr == args.pr_number {
             println!(
                 "PR #{} is already linked to changeset {}.",
@@ -43,9 +43,8 @@ pub fn run(args: &LinkArgs) -> Result<()> {
         }
     }
 
-    // 3. Save PR mapping to config.
-    let key = format!("jellycat.prs.{}", commit.change_id);
-    config::save(&repo_root, &key, &args.pr_number.to_string())?;
+    // 3. Save PR mapping via PrStore.
+    pr_store.set(&commit.change_id, args.pr_number)?;
 
     println!(
         "Linked PR #{} to change {}",

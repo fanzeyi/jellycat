@@ -1,5 +1,6 @@
-use crate::config::{self, Config};
+use crate::config::Config;
 use crate::jj::{DefaultRunner, Jj};
+use crate::pr_store::PrStore;
 use crate::repo;
 use anyhow::{Result, anyhow};
 use clap::Args;
@@ -21,7 +22,7 @@ pub struct GetArgs {
     pub rebase: bool,
 }
 
-pub fn run(args: &GetArgs, config: &Config) -> Result<()> {
+pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let repo_root = repo::find_root()
         .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
@@ -88,8 +89,7 @@ pub fn run(args: &GetArgs, config: &Config) -> Result<()> {
     // Track the PR so it appears in `jc status`.
     match repo::get_single_commit(jj.repo_root(), &local_branch) {
         Ok(commit) => {
-            let key = format!("jellycat.prs.{}", commit.change_id);
-            config::save(jj.repo_root(), &key, &args.pr_number.to_string())?;
+            pr_store.set(&commit.change_id, args.pr_number)?;
         }
         Err(e) => {
             tracing::warn!("Could not track PR: {}", e);

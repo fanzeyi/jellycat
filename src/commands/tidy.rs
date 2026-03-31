@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::gh::Gh;
 use crate::jj::{DefaultRunner, Jj};
+use crate::pr_store::PrStore;
 use crate::repo;
 use anyhow::{Result, anyhow};
 use clap::Args;
@@ -17,7 +18,7 @@ struct JjLogCommit {
     change_id: String,
 }
 
-pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
+pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let runner: Arc<dyn crate::jj::CommandRunner + Send + Sync> = Arc::new(DefaultRunner);
 
     let repo_root = repo::find_root()
@@ -134,10 +135,9 @@ pub fn run(_args: &TidyArgs, config: &Config) -> Result<()> {
         return Ok(());
     }
 
-    // Remove config entries for both closed PRs and abandoned changesets.
+    // Remove PR mappings for both closed PRs and abandoned changesets.
     for (change_id, _) in to_tidy.iter().chain(abandoned.iter()) {
-        let key = format!("jellycat.prs.{}", change_id);
-        jj.config_unset(&key)?;
+        pr_store.unset(change_id)?;
     }
 
     eprintln!("\nTidied {} PR mapping(s).", total);

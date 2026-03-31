@@ -1,5 +1,5 @@
-use crate::config;
-use crate::jj::Jj;
+use crate::config::Config;
+use crate::pr_store::PrStore;
 use crate::repo;
 use anyhow::{Result, anyhow};
 use clap::Args;
@@ -15,7 +15,7 @@ pub struct UnlinkArgs {
     pub pr_number: Option<u32>,
 }
 
-pub fn run(args: &UnlinkArgs) -> Result<()> {
+pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     if args.revset.is_none() && args.pr_number.is_none() {
         return Err(anyhow!(
             "Either --revset or --pr must be provided."
@@ -26,21 +26,13 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
         anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
     })?;
 
-    let jj = Jj::new(repo_root.clone());
-    let cfg = config::load(&repo_root)?;
-
     // If --pr is given without --revset, find the change_id that maps to this PR.
     if let (None, Some(pr_number)) = (&args.revset, args.pr_number) {
-        let change_id = cfg
-            .prs
-            .iter()
-            .find(|&(_, &pr)| pr == pr_number)
-            .map(|(cid, _)| cid.clone());
+        let change_id = pr_store.find_by_pr(pr_number)?;
 
         match change_id {
             Some(cid) => {
-                let key = format!("jellycat.prs.{}", cid);
-                jj.config_unset(&key)?;
+                pr_store.unset(&cid)?;
                 println!("Unlinked PR #{} from changeset {}", pr_number, cid);
             }
             None => {
@@ -53,7 +45,7 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
     // --revset is provided (possibly with --pr)
     let revset = args.revset.as_deref().unwrap();
     let commit = repo::get_single_commit(&repo_root, revset)?;
-    let existing_pr = cfg.prs.get(&commit.change_id).copied();
+    let existing_pr = config.prs.get(&commit.change_id).copied();
 
     match (existing_pr, args.pr_number) {
         (None, _) => {
@@ -73,8 +65,7 @@ pub fn run(args: &UnlinkArgs) -> Result<()> {
         _ => {}
     }
 
-    let key = format!("jellycat.prs.{}", commit.change_id);
-    jj.config_unset(&key)?;
+    pr_store.unset(&commit.change_id)?;
 
     let pr = args.pr_number.or(existing_pr).unwrap();
     println!(

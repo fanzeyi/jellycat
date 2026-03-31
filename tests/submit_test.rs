@@ -2,6 +2,7 @@ use anyhow::Result;
 use jellycat::commands::submit::{SubmitArgs, SubmitContext, run_with_context};
 use jellycat::config::Config;
 use jellycat::jj::CommandRunner;
+use jellycat::pr_store;
 use mockall::mock;
 use std::collections::HashMap;
 use std::fs;
@@ -32,23 +33,27 @@ fn test_submit_auth_failure() {
 
     let config = Config {
         upstream_repo: Some("owner/repo".to_string()),
-        upstream: None,
         origin: Some("origin".to_string()),
-        origin_repo: None,
-        github_user: None,
         prs: HashMap::new(),
-        bookmark_prefix: None,
         deprecated_keys: vec![],
+        ..Default::default()
     };
+
+    // Create a dummy Jj + PrStore for the context (won't be reached).
+    let temp_dir = tempdir().unwrap();
+    let jj = Arc::new(jellycat::jj::Jj::new(temp_dir.path().to_path_buf()));
+    let store = pr_store::create(&config.pr_store_type, jj);
 
     let ctx = SubmitContext {
         config: &config,
         runner: Arc::new(mock_runner),
+        pr_store: store.as_ref(),
     };
 
     let args = SubmitArgs {
         revset: Some("@".to_string()),
         stack: false,
+        draft: false,
     };
 
     let result = run_with_context(&args, &ctx);
@@ -188,7 +193,7 @@ fn test_submit_success_new_pr() {
             })
         });
 
-    // 10. jj config set (save PR mapping to config)
+    // 10. jj config set (save PR mapping — called by ConfigPrStore)
     mock_runner
         .expect_run_status()
         .withf(|cmd| {
@@ -200,23 +205,34 @@ fn test_submit_success_new_pr() {
 
     let config = Config {
         upstream_repo: Some("owner/repo".to_string()),
-        upstream: None,
         origin: Some("origin".to_string()),
-        origin_repo: None,
-        github_user: None,
         prs: HashMap::new(),
-        bookmark_prefix: None,
         deprecated_keys: vec![],
+        ..Default::default()
     };
+
+    // Build a ConfigPrStore that shares the same mock runner.
+    // Since ConfigPrStore uses its own Jj internally, and in this test the
+    // SubmitContext runner is the one that gets the config set call, we create
+    // a simple PrStore backed by a Jj pointing at the temp dir.
+    let runner_arc: Arc<dyn CommandRunner + Send + Sync> = Arc::new(mock_runner);
+
+    let jj_for_store = Arc::new(jellycat::jj::Jj::with_runner(
+        temp_dir.path().to_path_buf(),
+        Arc::clone(&runner_arc),
+    ));
+    let store = pr_store::create(&config.pr_store_type, jj_for_store);
 
     let ctx = SubmitContext {
         config: &config,
-        runner: Arc::new(mock_runner),
+        runner: runner_arc,
+        pr_store: store.as_ref(),
     };
 
     let args = SubmitArgs {
         revset: Some("@".to_string()),
         stack: false,
+        draft: false,
     };
 
     let result = run_with_context(&args, &ctx);

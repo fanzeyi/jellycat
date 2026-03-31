@@ -357,6 +357,48 @@ impl Jj {
         ))
     }
 
+    /// List local bookmarks as `(name, change_id)` pairs.
+    pub fn bookmark_list(&self, filter: Option<&str>) -> Result<Vec<(String, String)>> {
+        let mut cmd = self.cmd();
+        cmd.arg("bookmark")
+            .arg("list")
+            .arg("--template")
+            .arg(r#"name ++ "\t" ++ self.normal_target().commit_id().short(12) ++ "\n""#);
+        if let Some(filter) = filter {
+            cmd.arg(filter);
+        }
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj bookmark list failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut results = Vec::new();
+        for line in stdout.lines() {
+            if let Some((name, change_id)) = line.split_once('\t') {
+                results.push((name.to_string(), change_id.to_string()));
+            }
+        }
+        Ok(results)
+    }
+
+    pub fn bookmark_delete(&self, name: &str) -> Result<()> {
+        let mut cmd = self.cmd();
+        cmd.arg("bookmark").arg("delete").arg(name);
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "jj bookmark delete failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+
     pub fn repo_root(&self) -> &std::path::Path {
         &self.repo_root
     }

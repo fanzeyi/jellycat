@@ -20,6 +20,10 @@ pub struct SubmitArgs {
 
     #[arg(short, long = "stack")]
     pub stack: bool,
+
+    /// Create new PRs as draft
+    #[arg(short, long = "draft")]
+    pub draft: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -281,6 +285,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let head = format!("{}:{}", head_owner, &bookmark_name);
                 let base = default_branch.clone();
                 let head_repo = ctx.config.origin_repo.clone();
+                let draft = args.draft || ctx.config.draft;
                 let title = description
                     .lines()
                     .next()
@@ -294,6 +299,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                         &head,
                         &base,
                         head_repo.as_deref(),
+                        draft,
                     )?;
                     Ok((change_id, pr_num, url))
                 })

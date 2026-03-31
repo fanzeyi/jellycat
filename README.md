@@ -129,6 +129,7 @@ Use `--force` to reconfigure an already-initialized repo.
 Push commits and create or update GitHub PRs.
 
 - `-r, --revset <REVSET>` — Revset to submit (default: `@`, the current commit)
+- `-d, --draft` — Create new PRs as draft (does not affect existing PRs)
 
 This command:
 
@@ -185,6 +186,7 @@ Configuration is stored in jj's repo-local config under the `jellycat.*` namespa
 | `jellycat.origin_repo`     | Fork repo for cross-fork PRs (`owner/repo`)         |
 | `jellycat.github_user`     | GitHub username for per-user token auth             |
 | `jellycat.bookmark_prefix` | Prefix for created bookmarks (default: `jellycat/`) |
+| `jellycat.draft`           | Create new PRs as draft by default (`true`/`false`)  |
 | `jellycat.prs.<change-id>` | PR number linked to a change ID                     |
 
 Set config values with:

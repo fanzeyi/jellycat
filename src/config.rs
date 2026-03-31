@@ -16,6 +16,8 @@ pub struct Config {
     pub origin_repo: Option<String>,
     pub github_user: Option<String>,
     pub bookmark_prefix: Option<String>,
+    /// When true, new PRs are created as drafts by default.
+    pub draft: bool,
     pub prs: HashMap<String, u32>,
     /// Old config keys that were found and should trigger deprecation warnings.
     /// Vec of (old_key, new_key) pairs.
@@ -73,6 +75,8 @@ pub fn load(repo_path: &Path) -> Result<Config> {
                     old_head_repo_value = Some(value.to_string());
                 } else if key == "jellycat.github_user" {
                     config.github_user = Some(value.to_string());
+                } else if key == "jellycat.draft" {
+                    config.draft = value == "true";
                 } else if key == "jellycat.bookmark_prefix" {
                     config.bookmark_prefix = Some(value.to_string());
                 } else if let Some(change_id) = key.strip_prefix("jellycat.prs.") {

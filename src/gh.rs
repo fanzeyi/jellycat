@@ -409,6 +409,7 @@ impl Gh {
         head: &str,
         base: &str,
         head_repo: Option<&str>,
+        draft: bool,
     ) -> Result<(u32, String)> {
         let mut cmd = self.cmd();
         cmd.args([
@@ -427,6 +428,9 @@ impl Gh {
         ]);
         if let Some(repo) = head_repo {
             cmd.args(["-f", &format!("head_repo={}", repo)]);
+        }
+        if draft {
+            cmd.args(["-F", "draft=true"]);
         }
         self.log_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;

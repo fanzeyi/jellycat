@@ -195,7 +195,19 @@ pub fn run(args: &InitArgs) -> Result<()> {
     // GitHub account selection
     let selected_user = select_github_account()?;
 
-    // Save all four config keys
+    // Branch prefix selection
+    let theme = ColorfulTheme::default();
+    let default_prefix = match &selected_user {
+        Some(user) => format!("jellycat/{}/", user),
+        None => config::DEFAULT_BOOKMARK_PREFIX.to_string(),
+    };
+    let bookmark_prefix: String = Input::with_theme(&theme)
+        .with_prompt("Branch prefix")
+        .with_initial_text(&default_prefix)
+        .interact_text()
+        .context("Input cancelled")?;
+
+    // Save all config keys
     config::save(&repo_root, "jellycat.upstream", &upstream_remote)
         .context("Error saving upstream remote")?;
     config::save(&repo_root, "jellycat.upstream_repo", &upstream_repo)
@@ -208,6 +220,8 @@ pub fn run(args: &InitArgs) -> Result<()> {
         config::save(&repo_root, "jellycat.github_user", user)
             .context("Error saving github_user")?;
     }
+    config::save(&repo_root, "jellycat.bookmark_prefix", &bookmark_prefix)
+        .context("Error saving bookmark_prefix")?;
 
     println!();
     println!(
@@ -241,6 +255,11 @@ pub fn run(args: &InitArgs) -> Result<()> {
             style(user).cyan()
         );
     }
+    println!(
+        "  {} {}",
+        style("branch prefix:       ").bold(),
+        style(&bookmark_prefix).cyan()
+    );
     println!("");
 
     Ok(())

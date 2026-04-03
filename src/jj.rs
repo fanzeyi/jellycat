@@ -345,10 +345,10 @@ impl Jj {
     pub fn find_upstream_remote(&self, upstream_repo: &str) -> Result<String> {
         let output = self.git_remote_list()?;
         for line in output.lines() {
-            if let Some((name, url)) = line.split_once(' ') {
-                if url.contains(upstream_repo) {
-                    return Ok(name.to_string());
-                }
+            if let Some((name, url)) = line.split_once(' ')
+                && url.contains(upstream_repo)
+            {
+                return Ok(name.to_string());
             }
         }
         Err(anyhow!(

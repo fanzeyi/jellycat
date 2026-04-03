@@ -390,8 +390,7 @@ impl Gh {
                     pr_num,
                     PrInfo {
                         state: pr_data.state.clone(),
-                        comment_count: pr_data.comments.total_count
-                            + pr_data.reviews.total_count,
+                        comment_count: pr_data.comments.total_count + pr_data.reviews.total_count,
                         failed_checks,
                     },
                 );

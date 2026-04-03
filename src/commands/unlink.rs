@@ -17,9 +17,7 @@ pub struct UnlinkArgs {
 
 pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     if args.revset.is_none() && args.pr_number.is_none() {
-        return Err(anyhow!(
-            "Either --revset or --pr must be provided."
-        ));
+        return Err(anyhow!("Either --revset or --pr must be provided."));
     }
 
     let repo_root = repo::find_root().ok_or_else(|| {
@@ -68,10 +66,7 @@ pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result
     pr_store.unset(&commit.change_id)?;
 
     let pr = args.pr_number.or(existing_pr).unwrap();
-    println!(
-        "Unlinked PR #{} from changeset {}",
-        pr, commit.change_id
-    );
+    println!("Unlinked PR #{} from changeset {}", pr, commit.change_id);
 
     Ok(())
 }

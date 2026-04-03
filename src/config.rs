@@ -22,6 +22,8 @@ pub struct Config {
     pub prs: HashMap<String, u32>,
     /// Which backend stores PR ↔ change-id mappings.
     pub pr_store_type: PrStoreType,
+    /// Default revset to use when submitting
+    pub default_revset: Option<String>,
     /// Old config keys that were found and should trigger deprecation warnings.
     /// Vec of (old_key, new_key) pairs.
     pub deprecated_keys: Vec<(&'static str, &'static str)>,
@@ -87,6 +89,8 @@ pub fn load(repo_path: &Path) -> Result<Config> {
                         "bookmark" => PrStoreType::Bookmark,
                         _ => PrStoreType::Config,
                     };
+                } else if key == "jellycat.default_revset" {
+                    config.default_revset = Some(value.to_string());
                 }
             }
         }

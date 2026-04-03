@@ -7,8 +7,8 @@ use anyhow::{Context as _, Result, anyhow};
 use clap::Args;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
-use serde::Deserialize;
 use rand::Rng;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,7 +131,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     } else if args.stack {
         "trunk()..@"
     } else {
-        "@"
+        ctx.config.default_revset.as_deref().unwrap_or("@")
     };
 
     let output_str = jj

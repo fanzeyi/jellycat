@@ -1,5 +1,5 @@
 use crate::jj::Jj;
-use anyhow::{Context, Result, anyhow};
+use eyre::{Context, Result, eyre};
 use serde::Deserialize;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ pub fn get_single_commit(repo_root: &Path, revset: &str) -> Result<JjLogCommit> 
 
     let lines: Vec<&str> = output_str.lines().collect();
     if lines.len() != 1 {
-        return Err(anyhow!(
+        return Err(eyre!(
             "revset must resolve to exactly one commit, but got {}",
             lines.len()
         ));

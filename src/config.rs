@@ -1,6 +1,6 @@
 use crate::jj::Jj;
 use crate::pr_store::PrStoreType;
-use anyhow::Result;
+use eyre::Result;
 use std::collections::HashMap;
 use std::path::Path;
 

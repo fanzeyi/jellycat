@@ -3,9 +3,9 @@ use crate::gh::{Gh, GhAuth};
 use crate::jj::{CommandRunner, DefaultRunner, Jj};
 use crate::pr_store::PrStore;
 use crate::repo;
-use anyhow::{Context as _, Result, anyhow};
 use clap::Args;
 use console::style;
+use eyre::{Context, Result, eyre};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
 use serde::Deserialize;
@@ -85,6 +85,24 @@ fn new_spinner() -> ProgressBar {
     pb
 }
 
+fn format_bookmarks_for_debug(bookmarks: &[&str]) -> String {
+    if bookmarks.is_empty() {
+        "[]".to_string()
+    } else if bookmarks.len() == 1 {
+        format!("\"{}\"", bookmarks[0])
+    } else if bookmarks.len() == 2 {
+        format!("\"{}\", \"{}\"", bookmarks[0], bookmarks[1])
+    } else {
+        // only show the first 2, and indicate there are more
+        format!(
+            "\"{}\", \"{}\", and {} more",
+            bookmarks[0],
+            bookmarks[1],
+            bookmarks.len() - 2
+        )
+    }
+}
+
 pub struct SubmitContext<'a> {
     pub config: &'a Config,
     pub runner: Arc<dyn CommandRunner + Send + Sync>,
@@ -121,7 +139,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     );
 
     let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
     let jj = Arc::new(Jj::with_runner(repo_root, Arc::clone(&ctx.runner)));
     let gh = Arc::new(gh);
@@ -144,14 +162,14 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         .config
         .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))
+        .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))
         .cloned()?;
 
     let origin_remote = ctx
         .config
         .origin
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.origin not configured. Run 'jc init'."))
+        .ok_or_else(|| eyre!("jellycat.origin not configured. Run 'jc init'."))
         .cloned()?;
 
     let commits: Vec<JjLogCommit> = output_str
@@ -217,7 +235,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             .collect();
 
         let mut results = Vec::with_capacity(handles.len());
-        let mut errors: Vec<anyhow::Error> = Vec::new();
+        let mut errors: Vec<eyre::Error> = Vec::new();
         for handle in handles {
             match handle.join().expect("thread panicked") {
                 Ok(p) => results.push(p),
@@ -236,9 +254,14 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
     let pb = new_spinner();
     pb.set_message("Setting up bookmarks...");
     for p in &prepared {
-        jj.bookmark_set(&p.bookmark_name, &p.commit.change_id)?;
+        jj.bookmark_set(&p.bookmark_name, &p.commit.change_id)
+            .context(format!("Failed to set bookmark {}", p.bookmark_name))?;
         if p.is_new {
-            jj.bookmark_track(&p.bookmark_name, &origin_remote)?;
+            jj.bookmark_track(&p.bookmark_name, &origin_remote)
+                .context(format!(
+                    "Failed to track bookmark {} in JJ",
+                    p.bookmark_name
+                ))?;
         }
     }
     pb.set_style(success_spinner_style());
@@ -252,9 +275,14 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
         origin_remote
     ));
     let all_names: Vec<&str> = prepared.iter().map(|p| p.bookmark_name.as_str()).collect();
-    {
-        jj.git_push_bookmarks(&origin_remote, &all_names, &mut |_line| {})?;
-    }
+    jj.git_push_bookmarks(&origin_remote, &all_names)
+        .with_context(|| {
+            eyre!(
+                "Failed to push bookmark {} to remote \"{}\"",
+                format_bookmarks_for_debug(&all_names),
+                origin_remote
+            )
+        })?;
     pb.set_style(success_spinner_style());
     pb.finish_with_message(format!("Pushed {}", plural(total, "bookmark", "bookmarks")));
 
@@ -267,7 +295,12 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             plural(new_count, "new PR", "new PRs")
         ));
 
-        let default_branch = gh.default_branch(&upstream_repo)?;
+        let default_branch = gh.default_branch(&upstream_repo).with_context(|| {
+            eyre!(
+                "Failed to get default branch for upstream repo \"{}\"",
+                upstream_repo
+            )
+        })?;
         let head_owner = ctx
             .config
             .origin_repo
@@ -295,21 +328,25 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                     .unwrap_or("No description")
                     .to_string();
                 std::thread::spawn(move || -> Result<(String, u32, String)> {
-                    let (pr_num, url) = gh.create_pr(
-                        &upstream,
-                        &title,
-                        &commit_body(&description),
-                        &head,
-                        &base,
-                        head_repo.as_deref(),
-                        draft,
-                    )?;
+                    let (pr_num, url) = gh
+                        .create_pr(
+                            &upstream,
+                            &title,
+                            &commit_body(&description),
+                            &head,
+                            &base,
+                            head_repo.as_deref(),
+                            draft,
+                        )
+                        .with_context(|| {
+                            eyre!("Failed to create PR for bookmark \"{}\"", bookmark_name)
+                        })?;
                     Ok((change_id, pr_num, url))
                 })
             })
             .collect();
 
-        let mut errors: Vec<anyhow::Error> = Vec::new();
+        let mut errors: Vec<eyre::Error> = Vec::new();
         for handle in handles {
             match handle.join().expect("thread panicked") {
                 Ok((change_id, pr_num, _)) => {
@@ -355,7 +392,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
                 let is_new = p.is_new;
                 std::thread::spawn(move || -> Result<()> {
                     let pr_num = *pr_map.get(&change_id).ok_or_else(|| {
-                        anyhow!(
+                        eyre!(
                             "No PR number for commit {}",
                             &change_id[..12.min(change_id.len())]
                         )
@@ -401,7 +438,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
             })
             .collect();
 
-        let mut errors: Vec<anyhow::Error> = Vec::new();
+        let mut errors: Vec<_> = Vec::new();
         for handle in handles {
             if let Err(e) = handle.join().expect("thread panicked") {
                 errors.push(e);
@@ -473,7 +510,7 @@ fn commit_body(description: &str) -> String {
 
 fn get_stack(jj: &Jj, change_id: &str, pr_map: &HashMap<String, u32>) -> Result<Vec<StackCommit>> {
     jj.get_stack(change_id)
-        .context("Failed to get stack")?
+        .with_context(|| eyre!("Failed to get stack for change_id \"{}\"", change_id))?
         .iter()
         .map(|line| {
             let raw: JjLogCommit = serde_json::from_str(line)?;

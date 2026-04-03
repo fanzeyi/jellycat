@@ -1,16 +1,21 @@
-use anyhow::{Result, anyhow};
-use std::io::{BufRead, BufReader};
+use crate::error::{CommandError, check_output, format_cmd};
+use eyre::{Result, eyre};
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::Arc;
 
 pub trait CommandRunner {
     fn run_output(&self, cmd: &mut Command) -> Result<Output>;
     fn run_status(&self, cmd: &mut Command) -> Result<bool>;
-    /// Runs a command, calling `on_stderr` for each line written to stderr.
-    /// Defaults to `run_status` (ignoring lines), used by mocks in tests.
-    fn run_streaming(&self, cmd: &mut Command, _on_stderr: &mut dyn FnMut(&str)) -> Result<bool> {
-        self.run_status(cmd)
+
+    fn check_output(&self, cmd: &mut Command) -> Result<Output> {
+        let output = self.run_output(cmd)?;
+        check_output(format_cmd(cmd), &output)?;
+        Ok(output)
+    }
+
+    fn check_status(&self, cmd: &mut Command) -> Result<()> {
+        self.check_output(cmd).map(|_| ())
     }
 }
 
@@ -18,33 +23,27 @@ pub struct DefaultRunner;
 
 impl CommandRunner for DefaultRunner {
     fn run_output(&self, cmd: &mut Command) -> Result<Output> {
-        cmd.output()
-            .map_err(|e| anyhow!("Failed to execute command: {}", e))
+        let cmd_str = format_cmd(cmd);
+        cmd.output().map_err(|e| {
+            CommandError {
+                command: cmd_str,
+                exit_code: None,
+                stderr: e.to_string(),
+            }
+            .into()
+        })
     }
 
     fn run_status(&self, cmd: &mut Command) -> Result<bool> {
-        let status = cmd
-            .status()
-            .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
-        Ok(status.success())
-    }
-
-    fn run_streaming(&self, cmd: &mut Command, on_stderr: &mut dyn FnMut(&str)) -> Result<bool> {
-        cmd.stderr(Stdio::piped());
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
-        if let Some(stderr) = child.stderr.take() {
-            for line in BufReader::new(stderr).lines() {
-                match line {
-                    Ok(l) => on_stderr(&l),
-                    Err(_) => break,
-                }
+        let cmd_str = format_cmd(cmd);
+        let status = cmd.status().map_err(|e| -> eyre::Report {
+            CommandError {
+                command: cmd_str,
+                exit_code: None,
+                stderr: e.to_string(),
             }
-        }
-        let status = child
-            .wait()
-            .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
+            .into()
+        })?;
         Ok(status.success())
     }
 }
@@ -82,15 +81,7 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("config").arg("list");
         self.log_cmd(&cmd);
-        let output = self.runner.run_output(&mut cmd)?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj config list failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
+        let output = self.runner.check_output(&mut cmd)?;
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -102,37 +93,23 @@ impl Jj {
             .arg(key)
             .arg(value);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj config set failed"));
-        }
-
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn config_unset(&self, key: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("config").arg("unset").arg("--repo").arg(key);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj config unset failed"));
-        }
-
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn git_remote_list(&self) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("remote").arg("list");
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj git remote list failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
+        check_output(cmd_str, &output)?;
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -145,15 +122,9 @@ impl Jj {
             .arg("--template")
             .arg(template);
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj log failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
+        check_output(cmd_str, &output)?;
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -167,15 +138,9 @@ impl Jj {
             .arg(template)
             .arg("--reversed");
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj log failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
+        check_output(cmd_str, &output)?;
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -187,15 +152,9 @@ impl Jj {
             .arg("-r")
             .arg(revision);
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj bookmark set failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(())
+        check_output(cmd_str, &output)
     }
 
     pub fn describe(&self, change_id: &str, message: &str) -> Result<()> {
@@ -206,15 +165,9 @@ impl Jj {
             .arg("-m")
             .arg(message);
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj describe failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(())
+        check_output(cmd_str, &output)
     }
 
     pub fn get_stack(&self, revision: &str) -> Result<Vec<String>> {
@@ -228,15 +181,9 @@ impl Jj {
             .arg("json(self) ++ \"\\n\"")
             .arg("--reversed");
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj log failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
+        check_output(cmd_str, &output)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(stdout
             .lines()
@@ -253,15 +200,9 @@ impl Jj {
             .arg("--remote")
             .arg(remote);
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj bookmark track failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-
-        Ok(())
+        check_output(cmd_str, &output)
     }
 
     pub fn abandon(&self, change_ids: &[&str]) -> Result<bool> {
@@ -277,12 +218,7 @@ impl Jj {
         self.runner.run_status(&mut cmd)
     }
 
-    pub fn git_push(
-        &self,
-        remote: &str,
-        bookmark: &str,
-        on_stderr: &mut dyn FnMut(&str),
-    ) -> Result<()> {
+    pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("git")
             .arg("push")
@@ -291,11 +227,7 @@ impl Jj {
             .arg("--bookmark")
             .arg(bookmark);
         self.log_cmd(&cmd);
-        if !self.runner.run_streaming(&mut cmd, on_stderr)? {
-            return Err(anyhow!("jj git push failed"));
-        }
-
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     fn cmd_wc(&self) -> Command {
@@ -308,24 +240,14 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("import");
         self.log_cmd(&cmd);
-        let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj git import failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn new_commit(&self, revision: &str) -> Result<()> {
         let mut cmd = self.cmd_wc();
         cmd.arg("new").arg(revision);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj new failed"));
-        }
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn rebase(&self, branch: &str, destination: &str) -> Result<()> {
@@ -336,10 +258,7 @@ impl Jj {
             .arg("-d")
             .arg(destination);
         self.log_cmd(&cmd);
-        if !self.runner.run_status(&mut cmd)? {
-            return Err(anyhow!("jj rebase failed"));
-        }
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn find_upstream_remote(&self, upstream_repo: &str) -> Result<String> {
@@ -351,7 +270,7 @@ impl Jj {
                 return Ok(name.to_string());
             }
         }
-        Err(anyhow!(
+        Err(eyre!(
             "No remote found matching upstream repo '{}'",
             upstream_repo
         ))
@@ -368,13 +287,7 @@ impl Jj {
             cmd.arg(filter);
         }
         self.log_cmd(&cmd);
-        let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj bookmark list failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
+        let output = self.runner.check_output(&mut cmd)?;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut results = Vec::new();
         for line in stdout.lines() {
@@ -389,26 +302,14 @@ impl Jj {
         let mut cmd = self.cmd();
         cmd.arg("bookmark").arg("delete").arg(name);
         self.log_cmd(&cmd);
-        let output = self.runner.run_output(&mut cmd)?;
-        if !output.status.success() {
-            return Err(anyhow!(
-                "jj bookmark delete failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn repo_root(&self) -> &std::path::Path {
         &self.repo_root
     }
 
-    pub fn git_push_bookmarks(
-        &self,
-        remote: &str,
-        bookmarks: &[&str],
-        on_stderr: &mut dyn FnMut(&str),
-    ) -> Result<()> {
+    pub fn git_push_bookmarks(&self, remote: &str, bookmarks: &[&str]) -> Result<()> {
         if bookmarks.is_empty() {
             return Ok(());
         }
@@ -418,11 +319,7 @@ impl Jj {
             cmd.arg("--bookmark").arg(b);
         }
         self.log_cmd(&cmd);
-        if !self.runner.run_streaming(&mut cmd, on_stderr)? {
-            return Err(anyhow!("jj git push failed"));
-        }
-
-        Ok(())
+        self.runner.check_status(&mut cmd)
     }
 }
 

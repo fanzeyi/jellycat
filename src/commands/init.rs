@@ -2,10 +2,10 @@ use crate::config;
 use crate::gh::Gh;
 use crate::jj::{self, DefaultRunner, Jj};
 use crate::repo;
-use anyhow::{Context, Result, anyhow};
 use clap::Args;
 use console::style;
 use dialoguer::{Input, Select, theme::ColorfulTheme};
+use eyre::{Context, Result, eyre};
 use std::sync::Arc;
 
 #[derive(Args, Debug)]
@@ -148,9 +148,8 @@ fn select_github_account() -> Result<Option<String>> {
 }
 
 pub fn run(args: &InitArgs) -> Result<()> {
-    let repo_root = repo::find_root().ok_or_else(|| {
-        anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
-    })?;
+    let repo_root = repo::find_root()
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     let jj = Jj::new(repo_root.clone());
 
@@ -181,7 +180,7 @@ pub fn run(args: &InitArgs) -> Result<()> {
         .collect();
 
     if remotes.is_empty() {
-        return Err(anyhow!(
+        return Err(eyre!(
             "No git remotes found. Please add a remote using 'jj git remote add'."
         ));
     }

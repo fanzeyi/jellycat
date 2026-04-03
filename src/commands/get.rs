@@ -2,9 +2,9 @@ use crate::config::Config;
 use crate::jj::{DefaultRunner, Jj};
 use crate::pr_store::PrStore;
 use crate::repo;
-use anyhow::{Result, anyhow};
 use clap::Args;
 use console::style;
+use eyre::{Result, eyre};
 use std::process::Command;
 use std::sync::Arc;
 
@@ -24,14 +24,14 @@ pub struct GetArgs {
 
 pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
     let jj = Jj::with_runner(repo_root, Arc::new(DefaultRunner));
 
     let upstream_repo = config
         .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+        .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
 
     let remote_name = if let Some(ref name) = config.upstream {
         name.clone()
@@ -57,7 +57,7 @@ pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()
         .find(|line| line.starts_with(&format!("{} ", remote_name)))
         .and_then(|line| line.split_once(' '))
         .map(|(_, url)| url.trim())
-        .ok_or_else(|| anyhow!("Could not find URL for remote '{}'", remote_name))?
+        .ok_or_else(|| eyre!("Could not find URL for remote '{}'", remote_name))?
         .to_string();
 
     // Run git fetch with the remote URL directly
@@ -70,10 +70,10 @@ pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()
         .arg(&remote_url)
         .arg(&refspec)
         .status()
-        .map_err(|e| anyhow!("Failed to run git fetch: {}", e))?;
+        .map_err(|e| eyre!("Failed to run git fetch: {}", e))?;
 
     if !status.success() {
-        return Err(anyhow!("git fetch failed"));
+        return Err(eyre!("git fetch failed"));
     }
 
     // Import the new ref into jj

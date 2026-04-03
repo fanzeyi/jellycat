@@ -1,4 +1,4 @@
-use anyhow::Result;
+use eyre::Result;
 use jellycat::commands::submit::{SubmitArgs, SubmitContext, run_with_context};
 use jellycat::config::Config;
 use jellycat::jj::CommandRunner;

@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::pr_store::PrStore;
 use crate::repo;
-use anyhow::{Result, anyhow};
 use clap::Args;
+use eyre::{Result, eyre};
 
 #[derive(Args, Debug)]
 pub struct UnlinkArgs {
@@ -17,12 +17,11 @@ pub struct UnlinkArgs {
 
 pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     if args.revset.is_none() && args.pr_number.is_none() {
-        return Err(anyhow!("Either --revset or --pr must be provided."));
+        return Err(eyre!("Either --revset or --pr must be provided."));
     }
 
-    let repo_root = repo::find_root().ok_or_else(|| {
-        anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
-    })?;
+    let repo_root = repo::find_root()
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     // If --pr is given without --revset, find the change_id that maps to this PR.
     if let (None, Some(pr_number)) = (&args.revset, args.pr_number) {

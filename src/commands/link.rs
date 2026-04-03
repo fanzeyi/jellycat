@@ -1,8 +1,8 @@
 use crate::config::Config;
 use crate::pr_store::PrStore;
 use crate::repo;
-use anyhow::{Context, Result, anyhow};
 use clap::Args;
+use eyre::{Context, Result, eyre};
 
 #[derive(Args, Debug)]
 pub struct LinkArgs {
@@ -19,9 +19,8 @@ pub struct LinkArgs {
 }
 
 pub fn run(args: &LinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
-    let repo_root = repo::find_root().ok_or_else(|| {
-        anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
-    })?;
+    let repo_root = repo::find_root()
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     // 1. Get the commit.
     let commit =
@@ -36,7 +35,7 @@ pub fn run(args: &LinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<(
             );
             return Ok(());
         } else if !args.force {
-            return Err(anyhow!(
+            return Err(eyre!(
                 "Commit is already linked to PR #{}. Use --force to overwrite.",
                 existing_pr
             ));

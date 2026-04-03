@@ -1,6 +1,7 @@
-use anyhow::Context;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
+use color_eyre::eyre::Result;
+use eyre::{Context, eyre};
 use jellycat::commands::Commands;
 use jellycat::config;
 use jellycat::jj::Jj;
@@ -21,7 +22,11 @@ struct Cli {
     command: Commands,
 }
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
+    color_eyre::config::HookBuilder::default()
+        .display_env_section(false)
+        .install()?;
+
     let cli = Cli::parse();
 
     if cli.debug {
@@ -49,7 +54,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let repo_root = repo::find_root().ok_or_else(|| {
-        anyhow::anyhow!("Not a jujutsu repository (or any of the parent directories): .jj")
+        eyre::eyre!("Not a jujutsu repository (or any of the parent directories): .jj")
     })?;
 
     let mut config = config::load(&repo_root).context("Error loading config")?;
@@ -81,7 +86,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if config.upstream_repo.is_none() {
-        return Err(anyhow::anyhow!(
+        return Err(eyre!(
             "jellycat upstream not configured. Please run `jc init`."
         ));
     }

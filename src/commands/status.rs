@@ -2,9 +2,9 @@ use crate::config::Config;
 use crate::gh::Gh;
 use crate::jj::{CommandRunner, DefaultRunner, Jj};
 use crate::repo;
-use anyhow::{Result, anyhow};
 use clap::Args;
 use console::style;
+use eyre::{Result, eyre};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,14 +38,14 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
     };
 
     let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
     let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
 
     let upstream = config
         .upstream_repo
         .as_ref()
-        .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+        .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
 
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");

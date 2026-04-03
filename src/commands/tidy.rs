@@ -3,9 +3,9 @@ use crate::gh::Gh;
 use crate::jj::{DefaultRunner, Jj};
 use crate::pr_store::PrStore;
 use crate::repo;
-use anyhow::{Result, anyhow};
 use clap::Args;
 use console::style;
+use eyre::{Result, eyre};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<
     let runner: Arc<dyn crate::jj::CommandRunner + Send + Sync> = Arc::new(DefaultRunner);
 
     let repo_root = repo::find_root()
-        .ok_or_else(|| anyhow!("Not a jujutsu repository (or any parent directories): .jj"))?;
+        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
 
     let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
 
@@ -76,7 +76,7 @@ pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<
         let upstream = config
             .upstream_repo
             .as_ref()
-            .ok_or_else(|| anyhow!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+            .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
 
         let pr_nums: Vec<u32> = live_prs.iter().map(|(_, pr)| **pr).collect();
         let states = gh.pr_states(upstream, &pr_nums)?;

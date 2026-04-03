@@ -1,5 +1,5 @@
 use crate::jj::Jj;
-use anyhow::Result;
+use eyre::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 

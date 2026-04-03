@@ -1,5 +1,6 @@
+use crate::error::{check_output, format_cmd};
 use crate::jj::CommandRunner;
-use anyhow::{Context as _, Result, anyhow};
+use eyre::{Result, eyre};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
@@ -136,15 +137,10 @@ impl Gh {
         let mut cmd = Command::new("gh");
         cmd.args(["auth", "token", "--user", user]);
         tracing::debug!("Running gh: {:?}", cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
-        if !output.status.success() {
-            return Err(anyhow!(
-                "gh auth token failed for user '{}': {}",
-                user,
-                String::from_utf8_lossy(&output.stderr).trim(),
-            ));
-        }
+        check_output(cmd_str, &output)?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
@@ -190,39 +186,27 @@ impl Gh {
         let mut cmd = self.cmd();
         cmd.args(["auth", "status", "--json", "hosts", "--show-token"]);
         self.log_cmd(&cmd);
-        let output = self
-            .runner
-            .run_output(&mut cmd)
-            .context("Failed to execute 'gh auth status'")?;
+        let cmd_str = format_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
-        if !output.status.success() {
-            return Err(anyhow!(
-                "gh auth status failed. Make sure you are logged in: 'gh auth login'"
-            ));
-        }
+        check_output(cmd_str, &output)?;
         let status: GhAuthStatus = serde_json::from_slice(&output.stdout)?;
         status
             .hosts
             .get("github.com")
             .and_then(|hosts| hosts.first())
             .cloned()
-            .ok_or_else(|| anyhow!("No github.com authentication found. Run 'gh auth login'."))
+            .ok_or_else(|| eyre!("No github.com authentication found. Run 'gh auth login'."))
     }
 
     pub fn list_accounts(&self) -> Result<Vec<GhAuthAccount>> {
         let mut cmd = self.cmd();
         cmd.args(["auth", "status", "--json", "hosts"]);
         self.log_cmd(&cmd);
-        let output = self
-            .runner
-            .run_output(&mut cmd)
-            .context("Failed to execute 'gh auth status'")?;
+        let cmd_str = format_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
-        if !output.status.success() {
-            return Err(anyhow!(
-                "gh auth status failed. Make sure you are logged in: 'gh auth login'"
-            ));
-        }
+        check_output(cmd_str, &output)?;
 
         #[derive(Deserialize)]
         struct Account {
@@ -266,7 +250,7 @@ impl Gh {
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         data["headRefName"]
             .as_str()
-            .ok_or_else(|| anyhow!("No headRefName in response"))
+            .ok_or_else(|| eyre!("No headRefName in response"))
             .map(|s| s.to_string())
     }
 
@@ -300,15 +284,10 @@ impl Gh {
             body,
         ]);
         self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
-        if !output.status.success() {
-            return Err(anyhow!(
-                "gh pr edit failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ));
-        }
-        Ok(())
+        check_output(cmd_str, &output)
     }
 
     pub fn default_branch(&self, upstream: &str) -> Result<String> {
@@ -323,7 +302,7 @@ impl Gh {
         let output = self.runner.run_output(&mut cmd)?;
         tracing::debug!("gh exited with status={}", output.status);
         if !output.status.success() {
-            return Err(anyhow!(
+            return Err(eyre!(
                 "Failed to get default branch for {}: {}",
                 upstream,
                 Self::api_error(&output)
@@ -339,7 +318,7 @@ impl Gh {
         }
 
         let (owner, name) = upstream.split_once('/').ok_or_else(|| {
-            anyhow!(
+            eyre!(
                 "Invalid upstream format '{}', expected 'owner/repo'",
                 upstream
             )
@@ -366,10 +345,7 @@ impl Gh {
         tracing::debug!("gh exited with status={}", output.status);
 
         if !output.status.success() {
-            return Err(anyhow!(
-                "gh api graphql failed: {}",
-                Self::api_error(&output)
-            ));
+            return Err(eyre!("gh api graphql failed: {}", Self::api_error(&output)));
         }
 
         let response: PrStatesResponse = serde_json::from_slice(&output.stdout)?;
@@ -439,15 +415,15 @@ impl Gh {
             String::from_utf8_lossy(&output.stderr),
         );
         if !output.status.success() {
-            return Err(anyhow!("Failed to create PR: {}", Self::api_error(&output)));
+            return Err(eyre!("Failed to create PR: {}", Self::api_error(&output)));
         }
         let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         let pr_num = data["number"]
             .as_u64()
-            .ok_or_else(|| anyhow!("No PR number in response"))? as u32;
+            .ok_or_else(|| eyre!("No PR number in response"))? as u32;
         let url = data["html_url"]
             .as_str()
-            .ok_or_else(|| anyhow!("No html_url in response"))?
+            .ok_or_else(|| eyre!("No html_url in response"))?
             .to_string();
         Ok((pr_num, url))
     }

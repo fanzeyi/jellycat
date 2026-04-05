@@ -1,12 +1,10 @@
+use crate::commands::CommandCtx;
 use crate::config::Config;
-use crate::jj::{DefaultRunner, Jj};
 use crate::pr_store::PrStore;
 use crate::repo;
 use clap::Args;
 use console::style;
 use eyre::{Result, eyre};
-use std::process::Command;
-use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct GetArgs {
@@ -23,15 +21,19 @@ pub struct GetArgs {
 }
 
 pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
-    let repo_root = repo::find_root()
-        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
+    let ctx = CommandCtx::new()?;
+    run_with_ctx(args, config, pr_store, &ctx)
+}
 
-    let jj = Jj::with_runner(repo_root, Arc::new(DefaultRunner));
-
-    let upstream_repo = config
-        .upstream_repo
-        .as_ref()
-        .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+/// Internal entry point used by tests with a mock runner.
+pub fn run_with_ctx(
+    args: &GetArgs,
+    config: &Config,
+    pr_store: &dyn PrStore,
+    ctx: &CommandCtx,
+) -> Result<()> {
+    let jj = &ctx.jj;
+    let upstream_repo = ctx.require_upstream(config)?;
 
     let remote_name = if let Some(ref name) = config.upstream {
         name.clone()
@@ -61,20 +63,7 @@ pub fn run(args: &GetArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()
         .to_string();
 
     // Run git fetch with the remote URL directly
-    let repo_path = jj.repo_root();
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(repo_path)
-        .arg("fetch")
-        .arg("--no-tags")
-        .arg(&remote_url)
-        .arg(&refspec)
-        .status()
-        .map_err(|e| eyre!("Failed to run git fetch: {}", e))?;
-
-    if !status.success() {
-        return Err(eyre!("git fetch failed"));
-    }
+    jj.git_fetch_refspec(&remote_url, &refspec)?;
 
     // Import the new ref into jj
     jj.git_import()?;

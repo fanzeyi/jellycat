@@ -1,13 +1,10 @@
+use crate::commands::CommandCtx;
 use crate::config::Config;
-use crate::gh::Gh;
-use crate::jj::{CommandRunner, DefaultRunner, Jj};
-use crate::repo;
 use clap::Args;
 use console::style;
-use eyre::{Result, eyre};
+use eyre::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct StatusArgs {}
@@ -26,26 +23,10 @@ struct JjAuthor {
 }
 
 pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
-    let runner: Arc<dyn CommandRunner + Send + Sync> = Arc::new(DefaultRunner);
-
-    let gh = if let Some(user) = &config.github_user {
-        let token = Gh::get_token(&runner, user)?;
-        Gh::with_token(Arc::clone(&runner), token)
-    } else {
-        let gh = Gh::new(Arc::clone(&runner));
-        let _auth = gh.auth_status()?;
-        gh
-    };
-
-    let repo_root = repo::find_root()
-        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
-
-    let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
-
-    let upstream = config
-        .upstream_repo
-        .as_ref()
-        .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+    let ctx = CommandCtx::new()?;
+    let gh = ctx.gh(config)?;
+    let jj = &ctx.jj;
+    let upstream = ctx.require_upstream(config)?;
 
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");
@@ -105,17 +86,8 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
             style(format!("#{}", pr_num)).bold(),
         );
 
-        let comments_str = if comment_count > 0 {
-            format!(" {}", style(format!("💬{}", comment_count)).dim())
-        } else {
-            String::new()
-        };
-
-        let checks_str = if failed_checks > 0 {
-            format!(" {}", style(format!("❌{}", failed_checks)).red())
-        } else {
-            String::new()
-        };
+        let comments_str = badge("💬", comment_count, |s| style(s).dim().to_string());
+        let checks_str = badge("❌", failed_checks, |s| style(s).red().to_string());
 
         let change_short = &change_id[..12.min(change_id.len())];
 
@@ -155,6 +127,15 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Render a ` {icon}{n}` badge styled by `style_fn`, or an empty string when `n == 0`.
+fn badge(icon: &str, n: u32, style_fn: impl FnOnce(String) -> String) -> String {
+    if n == 0 {
+        String::new()
+    } else {
+        format!(" {}", style_fn(format!("{}{}", icon, n)))
+    }
 }
 
 /// Formats an RFC3339 timestamp into a human-friendly relative or short form.

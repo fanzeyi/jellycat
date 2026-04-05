@@ -1,3 +1,4 @@
+use crate::commands::CommandCtx;
 use crate::config::Config;
 use crate::pr_store::PrStore;
 use crate::repo;
@@ -19,12 +20,11 @@ pub struct LinkArgs {
 }
 
 pub fn run(args: &LinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
-    let repo_root = repo::find_root()
-        .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let ctx = CommandCtx::new()?;
 
     // 1. Get the commit.
     let commit =
-        repo::get_single_commit(&repo_root, &args.revset).context("Failed to get commit")?;
+        repo::get_single_commit(&ctx.repo_root, &args.revset).context("Failed to get commit")?;
 
     // 2. Check for existing PR link.
     if let Some(&existing_pr) = config.prs.get(&commit.change_id) {

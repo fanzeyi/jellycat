@@ -1,3 +1,4 @@
+use crate::commands::CommandCtx;
 use crate::config::Config;
 use crate::pr_store::PrStore;
 use crate::repo;
@@ -20,8 +21,7 @@ pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result
         return Err(eyre!("Either --revset or --pr must be provided."));
     }
 
-    let repo_root = repo::find_root()
-        .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
+    let ctx = CommandCtx::new()?;
 
     // If --pr is given without --revset, find the change_id that maps to this PR.
     if let (None, Some(pr_number)) = (&args.revset, args.pr_number) {
@@ -41,7 +41,7 @@ pub fn run(args: &UnlinkArgs, config: &Config, pr_store: &dyn PrStore) -> Result
 
     // --revset is provided (possibly with --pr)
     let revset = args.revset.as_deref().unwrap();
-    let commit = repo::get_single_commit(&repo_root, revset)?;
+    let commit = repo::get_single_commit(&ctx.repo_root, revset)?;
     let existing_pr = config.prs.get(&commit.change_id).copied();
 
     match (existing_pr, args.pr_number) {

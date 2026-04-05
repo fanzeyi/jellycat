@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use clap_complete::Shell;
 
+pub mod context;
 pub mod get;
 pub mod init;
 pub mod link;
@@ -8,6 +9,8 @@ pub mod status;
 pub mod submit;
 pub mod tidy;
 pub mod unlink;
+
+pub use context::CommandCtx;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {

@@ -85,6 +85,32 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    /// Parse `jj config list` output into `(key, value)` pairs with surrounding
+    /// double-quotes stripped. Entries without `=` are skipped.
+    ///
+    /// When `prefix` is `Some`, only keys starting with it are returned.
+    pub fn config_list_parsed(&self, prefix: Option<&str>) -> Result<Vec<(String, String)>> {
+        let stdout = self.config_list()?;
+        let mut out = Vec::new();
+        for line in stdout.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            if let Some(p) = prefix
+                && !key.starts_with(p)
+            {
+                continue;
+            }
+            let mut value = value.trim();
+            if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                value = &value[1..value.len() - 1];
+            }
+            out.push((key.to_string(), value.to_string()));
+        }
+        Ok(out)
+    }
+
     pub fn config_set(&self, key: &str, value: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("config")
@@ -234,6 +260,20 @@ impl Jj {
         let mut cmd = Command::new("jj");
         cmd.arg("-R").arg(&self.repo_root);
         cmd
+    }
+
+    /// Fetch a refspec from a remote URL via the `git` binary.
+    /// Used by `jc get` because `jj git fetch` doesn't support arbitrary refspecs.
+    pub fn git_fetch_refspec(&self, remote_url: &str, refspec: &str) -> Result<()> {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C")
+            .arg(&self.repo_root)
+            .arg("fetch")
+            .arg("--no-tags")
+            .arg(remote_url)
+            .arg(refspec);
+        tracing::debug!("Running git: {:?}", cmd);
+        self.runner.check_status(&mut cmd)
     }
 
     pub fn git_import(&self) -> Result<()> {

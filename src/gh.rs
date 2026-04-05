@@ -324,18 +324,39 @@ impl Gh {
             )
         })?;
 
-        let aliases: Vec<String> = pr_nums
+        // Per-PR fragment; `{n}` is replaced with the PR number for each alias.
+        const PR_FRAGMENT: &str = r#"
+  pr_{n}: pullRequest(number: {n}) {
+    state
+    comments { totalCount }
+    reviews(first: 0) { totalCount }
+    commits(last: 1) {
+      nodes {
+        commit {
+          statusCheckRollup {
+            contexts(first: 100) {
+              nodes {
+                __typename
+                ... on CheckRun { conclusion }
+                ... on StatusContext { state }
+              }
+            }
+          }
+        }
+      }
+    }
+  }"#;
+
+        let aliases: String = pr_nums
             .iter()
-            .map(|n| format!(
-                "pr_{n}: pullRequest(number: {n}) {{ state comments {{ totalCount }} reviews(first: 0) {{ totalCount }} commits(last: 1) {{ nodes {{ commit {{ statusCheckRollup {{ contexts(first: 100) {{ nodes {{ __typename ... on CheckRun {{ conclusion }} ... on StatusContext {{ state }} }} }} }} }} }} }} }}",
-            ))
+            .map(|n| PR_FRAGMENT.replace("{n}", &n.to_string()))
             .collect();
 
         let query = format!(
-            "query {{ repository(owner: \"{}\", name: \"{}\") {{ {} }} }}",
-            owner,
-            name,
-            aliases.join(" ")
+            r#"query {{
+  repository(owner: "{owner}", name: "{name}") {{{aliases}
+  }}
+}}"#
         );
 
         let mut cmd = self.cmd();

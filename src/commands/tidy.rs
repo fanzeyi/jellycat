@@ -1,14 +1,11 @@
+use crate::commands::CommandCtx;
 use crate::config::Config;
-use crate::gh::Gh;
-use crate::jj::{DefaultRunner, Jj};
 use crate::pr_store::PrStore;
-use crate::repo;
 use clap::Args;
 use console::style;
-use eyre::{Result, eyre};
+use eyre::Result;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct TidyArgs {}
@@ -19,12 +16,8 @@ struct JjLogCommit {
 }
 
 pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
-    let runner: Arc<dyn crate::jj::CommandRunner + Send + Sync> = Arc::new(DefaultRunner);
-
-    let repo_root = repo::find_root()
-        .ok_or_else(|| eyre!("Not a jujutsu repository (or any parent directories): .jj"))?;
-
-    let jj = Jj::with_runner(repo_root, Arc::clone(&runner));
+    let ctx = CommandCtx::new()?;
+    let jj = &ctx.jj;
 
     if config.prs.is_empty() {
         eprintln!("No tracked PRs.");
@@ -64,19 +57,8 @@ pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<
         .collect();
 
     let to_tidy: Vec<(&String, &u32)> = if !live_prs.is_empty() {
-        let gh = if let Some(user) = &config.github_user {
-            let token = Gh::get_token(&runner, user)?;
-            Gh::with_token(Arc::clone(&runner), token)
-        } else {
-            let gh = Gh::new(Arc::clone(&runner));
-            let _auth = gh.auth_status()?;
-            gh
-        };
-
-        let upstream = config
-            .upstream_repo
-            .as_ref()
-            .ok_or_else(|| eyre!("jellycat.upstream_repo not configured. Run 'jc init'."))?;
+        let gh = ctx.gh(config)?;
+        let upstream = ctx.require_upstream(config)?;
 
         let pr_nums: Vec<u32> = live_prs.iter().map(|(_, pr)| **pr).collect();
         let states = gh.pr_states(upstream, &pr_nums)?;

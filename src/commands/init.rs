@@ -1,4 +1,4 @@
-use crate::config;
+use crate::config::{self, keys};
 use crate::gh::Gh;
 use crate::jj::{self, DefaultRunner, Jj};
 use crate::repo;
@@ -207,19 +207,17 @@ pub fn run(args: &InitArgs) -> Result<()> {
         .context("Input cancelled")?;
 
     // Save all config keys
-    config::save(&repo_root, "jellycat.upstream", &upstream_remote)
+    config::save(&repo_root, keys::UPSTREAM, &upstream_remote)
         .context("Error saving upstream remote")?;
-    config::save(&repo_root, "jellycat.upstream_repo", &upstream_repo)
+    config::save(&repo_root, keys::UPSTREAM_REPO, &upstream_repo)
         .context("Error saving upstream repo")?;
-    config::save(&repo_root, "jellycat.origin", &origin_remote)
-        .context("Error saving origin remote")?;
-    config::save(&repo_root, "jellycat.origin_repo", &origin_repo)
+    config::save(&repo_root, keys::ORIGIN, &origin_remote).context("Error saving origin remote")?;
+    config::save(&repo_root, keys::ORIGIN_REPO, &origin_repo)
         .context("Error saving origin repo")?;
     if let Some(ref user) = selected_user {
-        config::save(&repo_root, "jellycat.github_user", user)
-            .context("Error saving github_user")?;
+        config::save(&repo_root, keys::GITHUB_USER, user).context("Error saving github_user")?;
     }
-    config::save(&repo_root, "jellycat.bookmark_prefix", &bookmark_prefix)
+    config::save(&repo_root, keys::BOOKMARK_PREFIX, &bookmark_prefix)
         .context("Error saving bookmark_prefix")?;
 
     println!();

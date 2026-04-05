@@ -1,3 +1,4 @@
+use crate::config::keys;
 use crate::jj::Jj;
 use eyre::Result;
 use std::collections::HashMap;
@@ -37,32 +38,25 @@ pub struct ConfigPrStore {
 
 impl PrStore for ConfigPrStore {
     fn list(&self) -> Result<HashMap<String, u32>> {
-        let stdout = self.jj.config_list()?;
+        let entries = self.jj.config_list_parsed(Some(keys::PRS_PREFIX))?;
         let mut map = HashMap::new();
-        for line in stdout.lines() {
-            if let Some((key, value)) = line.split_once('=') {
-                let key = key.trim();
-                let mut value = value.trim();
-                if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                    value = &value[1..value.len() - 1];
-                }
-                if let Some(change_id) = key.strip_prefix("jellycat.prs.")
-                    && let Ok(pr_num) = value.parse::<u32>()
-                {
-                    map.insert(change_id.to_string(), pr_num);
-                }
+        for (key, value) in entries {
+            if let Some(change_id) = key.strip_prefix(keys::PRS_PREFIX)
+                && let Ok(pr_num) = value.parse::<u32>()
+            {
+                map.insert(change_id.to_string(), pr_num);
             }
         }
         Ok(map)
     }
 
     fn set(&self, change_id: &str, pr_number: u32) -> Result<()> {
-        let key = format!("jellycat.prs.{}", change_id);
+        let key = format!("{}{}", keys::PRS_PREFIX, change_id);
         self.jj.config_set(&key, &pr_number.to_string())
     }
 
     fn unset(&self, change_id: &str) -> Result<()> {
-        let key = format!("jellycat.prs.{}", change_id);
+        let key = format!("{}{}", keys::PRS_PREFIX, change_id);
         self.jj.config_unset(&key)
     }
 }

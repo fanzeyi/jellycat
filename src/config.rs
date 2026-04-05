@@ -20,6 +20,7 @@ pub mod keys {
     pub const PR_STORE: &str = "jellycat.pr_store";
     pub const DEFAULT_REVSET: &str = "jellycat.default_revset";
     pub const PRS_PREFIX: &str = "jellycat.prs.";
+    pub const PR_TEMPLATE: &str = "jellycat.pr_template";
 }
 
 #[derive(Debug, Default)]
@@ -40,6 +41,8 @@ pub struct Config {
     pub pr_store_type: PrStoreType,
     /// Default revset to use when submitting
     pub default_revset: Option<String>,
+    /// Template for PR
+    pub pr_template: Option<String>,
     /// Old config keys that were found and should trigger deprecation warnings.
     /// Vec of (old_key, new_key) pairs.
     pub deprecated_keys: Vec<(&'static str, &'static str)>,
@@ -112,6 +115,9 @@ pub fn load_from_entries(entries: Vec<(String, String)>) -> Result<Config> {
             }
             keys::DEFAULT_REVSET => {
                 config.default_revset = Some(value);
+            }
+            keys::PR_TEMPLATE => {
+                config.pr_template = Some(value);
             }
             _ => {}
         }

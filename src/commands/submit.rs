@@ -179,6 +179,7 @@ pub fn run_with_context(args: &SubmitArgs, ctx: &SubmitContext) -> Result<()> {
 
     // Phase 5: rebuild each PR body with nav/stack info.
     phase_update_pr_bodies(
+        ctx,
         Arc::clone(&jj),
         Arc::clone(&gh),
         &upstream_repo,
@@ -406,7 +407,7 @@ fn phase_create_prs(
                     .create_pr(
                         &upstream,
                         &title,
-                        &commit_body(&description),
+                        &commit_body(&description, None),
                         &head,
                         &base,
                         head_repo.as_deref(),
@@ -445,6 +446,7 @@ fn phase_create_prs(
 /// review-diff link while preserving any user edits below the `<!-- jellycat -->`
 /// marker.
 fn phase_update_pr_bodies(
+    ctx: &SubmitContext,
     jj: Arc<Jj>,
     gh: Arc<crate::gh::Gh>,
     upstream_repo: &str,
@@ -468,6 +470,7 @@ fn phase_update_pr_bodies(
             let description = p.commit.description.clone();
             let upstream = upstream_repo.to_string();
             let is_new = p.is_new;
+            let pr_template = ctx.config.pr_template.clone();
             std::thread::spawn(move || -> Result<()> {
                 let pr_num = *pr_map.get(&change_id).ok_or_else(|| {
                     eyre!(
@@ -479,13 +482,13 @@ fn phase_update_pr_bodies(
                 let graph = generate_stack_graph(&stack, &change_id, &upstream);
 
                 let user_content = if is_new {
-                    commit_body(&description)
+                    commit_body(&description, pr_template.as_deref())
                 } else {
                     let current_body = gh.pr_view_body(&upstream, pr_num)?;
                     current_body
                         .split_once("<!-- jellycat -->")
                         .map(|(_, rest)| rest.trim().to_string())
-                        .unwrap_or_else(|| commit_body(&description))
+                        .unwrap_or_else(|| commit_body(&description, pr_template.as_deref()))
                 };
 
                 let review_link = format!(
@@ -572,11 +575,17 @@ fn print_summary(prepared: &[PreparedCommit], pr_map: &HashMap<String, u32>, ups
 }
 
 /// Returns the body of a commit description — everything after the first line (title).
-fn commit_body(description: &str) -> String {
+fn commit_body(description: &str, pr_template: Option<&str>) -> String {
     let trimmed = description.trim();
-    match trimmed.find('\n') {
+    let commit_description = match trimmed.find('\n') {
         Some(pos) => trimmed[pos..].trim().to_string(),
         None => String::new(),
+    };
+
+    if let Some(template) = pr_template {
+        format!("{}\n\n{}", template, commit_description)
+    } else {
+        commit_description
     }
 }
 

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct JjLogCommit {
+    pub commit_id: String,
     pub change_id: String,
     pub description: String,
 }

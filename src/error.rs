@@ -16,16 +16,19 @@ impl fmt::Display for CommandError {
     }
 }
 
-impl Into<eyre::Report> for CommandError {
-    fn into(self) -> eyre::Report {
-        let report = eyre::eyre!("{}", &self).section(self.stderr.header("Stderr:"));
+impl std::error::Error for CommandError {}
 
-        if let Some(exit_code) = self.exit_code {
-            report
-                .section(format!("{}\n(exit code: {})", self.command, exit_code).header("Command:"))
+impl CommandError {
+    fn into_report(self) -> eyre::Report {
+        let command_section = if let Some(exit_code) = self.exit_code {
+            format!("{}\n(exit code: {})", self.command, exit_code)
         } else {
-            report.section(self.command.header("Command:"))
-        }
+            self.command.clone()
+        };
+        let stderr_section = self.stderr.clone();
+        eyre::Report::from(self)
+            .section(stderr_section.header("Stderr:"))
+            .section(command_section.header("Command:"))
     }
 }
 
@@ -51,5 +54,13 @@ pub fn check_output(cmd_str: String, output: &std::process::Output) -> eyre::Res
         exit_code: output.status.code(),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
     }
-    .into())
+    .into_report())
+}
+
+pub fn format_error_short(err: &eyre::Report) -> String {
+    if let Some(command_error) = err.downcast_ref::<CommandError>() {
+        format!("Command execution failed: {}", command_error.stderr)
+    } else {
+        err.to_string()
+    }
 }

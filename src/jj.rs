@@ -1,8 +1,10 @@
 use crate::error::{CommandError, check_output, format_cmd};
 use eyre::{Result, eyre};
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::sync::Arc;
+use tracing::instrument;
 
 pub trait CommandRunner {
     fn run_output(&self, cmd: &mut Command) -> Result<Output>;
@@ -53,6 +55,14 @@ pub struct Jj {
     runner: Arc<dyn CommandRunner + Send + Sync>,
 }
 
+impl Debug for Jj {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Jj")
+            .field("repo_root", &self.repo_root)
+            .finish()
+    }
+}
+
 impl Jj {
     pub fn new(repo_root: PathBuf) -> Self {
         Self {
@@ -77,6 +87,7 @@ impl Jj {
         tracing::debug!("Running jj: {:?}", cmd);
     }
 
+    #[instrument]
     pub fn config_list(&self) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("config").arg("list");
@@ -111,6 +122,7 @@ impl Jj {
         Ok(out)
     }
 
+    #[instrument]
     pub fn config_set(&self, key: &str, value: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("config")
@@ -122,6 +134,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn config_unset(&self, key: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("config").arg("unset").arg("--repo").arg(key);
@@ -129,6 +142,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn git_remote_list(&self) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("remote").arg("list");
@@ -139,6 +153,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    #[instrument]
     pub fn log(&self, revset: &str, template: &str) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("log")
@@ -154,6 +169,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    #[instrument]
     pub fn log_reversed(&self, revset: &str, template: &str) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.arg("log")
@@ -170,6 +186,7 @@ impl Jj {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
+    #[instrument]
     pub fn bookmark_set(&self, name: &str, revision: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("bookmark")
@@ -183,6 +200,7 @@ impl Jj {
         check_output(cmd_str, &output)
     }
 
+    #[instrument]
     pub fn describe(&self, change_id: &str, message: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("describe")
@@ -196,6 +214,7 @@ impl Jj {
         check_output(cmd_str, &output)
     }
 
+    #[instrument]
     pub fn get_stack(&self, revision: &str) -> Result<Vec<String>> {
         let revset = format!("(::{} | {}::) & mutable()", revision, revision);
         let mut cmd = self.cmd();
@@ -218,6 +237,7 @@ impl Jj {
             .collect())
     }
 
+    #[instrument]
     pub fn bookmark_track(&self, name: &str, remote: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("bookmark")
@@ -231,6 +251,7 @@ impl Jj {
         check_output(cmd_str, &output)
     }
 
+    #[instrument]
     pub fn abandon(&self, change_ids: &[&str]) -> Result<bool> {
         if change_ids.is_empty() {
             return Ok(true);
@@ -244,6 +265,7 @@ impl Jj {
         self.runner.run_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn git_push(&self, remote: &str, bookmark: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("git")
@@ -264,6 +286,7 @@ impl Jj {
 
     /// Fetch a refspec from a remote URL via the `git` binary.
     /// Used by `jc get` because `jj git fetch` doesn't support arbitrary refspecs.
+    #[instrument]
     pub fn git_fetch_refspec(&self, remote_url: &str, refspec: &str) -> Result<()> {
         let mut cmd = Command::new("git");
         cmd.arg("-C")
@@ -276,6 +299,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn git_import(&self) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("git").arg("import");
@@ -283,6 +307,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn new_commit(&self, revision: &str) -> Result<()> {
         let mut cmd = self.cmd_wc();
         cmd.arg("new").arg(revision);
@@ -290,6 +315,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn rebase(&self, branch: &str, destination: &str) -> Result<()> {
         let mut cmd = self.cmd_wc();
         cmd.arg("rebase")
@@ -301,6 +327,7 @@ impl Jj {
         self.runner.check_status(&mut cmd)
     }
 
+    #[instrument]
     pub fn find_upstream_remote(&self, upstream_repo: &str) -> Result<String> {
         let output = self.git_remote_list()?;
         for line in output.lines() {
@@ -317,6 +344,7 @@ impl Jj {
     }
 
     /// List local bookmarks as `(name, change_id)` pairs.
+    #[instrument]
     pub fn bookmark_list(&self, filter: Option<&str>) -> Result<Vec<(String, String)>> {
         let mut cmd = self.cmd();
         cmd.arg("bookmark")
@@ -338,6 +366,7 @@ impl Jj {
         Ok(results)
     }
 
+    #[instrument]
     pub fn bookmark_delete(&self, name: &str) -> Result<()> {
         let mut cmd = self.cmd();
         cmd.arg("bookmark").arg("delete").arg(name);
@@ -349,6 +378,7 @@ impl Jj {
         &self.repo_root
     }
 
+    #[instrument]
     pub fn git_push_bookmarks(&self, remote: &str, bookmarks: &[&str]) -> Result<()> {
         if bookmarks.is_empty() {
             return Ok(());

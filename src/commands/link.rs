@@ -1,11 +1,13 @@
 use crate::commands::CommandCtx;
 use crate::config::Config;
+use crate::error::format_error_short;
 use crate::gh::Gh;
 use crate::pr_store::PrStore;
 use crate::repo::{self, JjLogCommit};
 use clap::Args;
 use eyre::{Context, Result, bail, eyre};
 use std::collections::HashSet;
+use tracing::instrument;
 
 #[derive(Args, Debug)]
 pub struct LinkArgs {
@@ -78,6 +80,80 @@ fn run_single(
     Ok(())
 }
 
+#[derive(Debug)]
+enum SmartLinkResult {
+    NotFound,
+    Skipped,
+    Linked,
+    Conflict,
+    Error(eyre::Report),
+}
+
+#[instrument(skip(ctx, pr_store))]
+fn link_pr_to_bookmark(
+    ctx: &CommandCtx,
+    config: &Config,
+    pr_store: &dyn PrStore,
+    pr_num: u32,
+    head_ref: &str,
+    force: bool,
+) -> SmartLinkResult {
+    // Resolve the bookmark to a change-id using the ctx's jj client so
+    // tests can mock the underlying subprocess.
+    let Ok(output) = ctx
+        .jj
+        .log(&format!("remote_bookmarks({})", head_ref), "json(self)")
+    else {
+        println!(
+            "Skipped bookmark {} from PR #{} (no commit found)",
+            head_ref, pr_num
+        );
+        return SmartLinkResult::NotFound;
+    };
+    let Some(line) = output.lines().next() else {
+        tracing::debug!(
+            "No commit found for bookmark {}: no output from jj log",
+            head_ref
+        );
+        return SmartLinkResult::NotFound;
+    };
+    let Ok(commit) = serde_json::from_str::<JjLogCommit>(line)
+        .with_context(|| format!("Failed to parse jj log JSON for bookmark {}", head_ref))
+    else {
+        tracing::debug!(
+            "Failed to parse jj log JSON for bookmark {}: {}",
+            head_ref,
+            line
+        );
+        return SmartLinkResult::NotFound;
+    };
+
+    if let Some(&existing_pr) = config.prs.get(&commit.change_id) {
+        if existing_pr == pr_num {
+            println!(
+                "Skipped PR #{} → {} (already linked)",
+                pr_num, commit.change_id
+            );
+            return SmartLinkResult::Skipped;
+        } else if !force {
+            println!(
+                "Conflict: bookmark {} (change {}) already linked to PR #{}, not PR #{} (use --force to overwrite)",
+                head_ref, commit.change_id, existing_pr, pr_num
+            );
+            return SmartLinkResult::Conflict;
+        }
+    }
+
+    match pr_store.set(&commit.commit_id, pr_num) {
+        Ok(()) => {
+            println!("Linked PR #{} → {}", pr_num, commit.change_id);
+            SmartLinkResult::Linked
+        }
+        Err(e) => SmartLinkResult::Error(e),
+    }
+}
+
+#[instrument(skip(pr_store, ctx, gh))]
 pub fn run_smart(
     args: &LinkArgs,
     config: &Config,
@@ -99,37 +175,20 @@ pub fn run_smart(
             continue;
         }
 
-        // Resolve the bookmark to a change-id using the ctx's jj client so
-        // tests can mock the underlying subprocess.
-        let output = ctx.jj.log(&head_ref, "json(self)")?;
-        let line = output
-            .lines()
-            .next()
-            .ok_or_else(|| eyre!("No commit found for bookmark {}", head_ref))?;
-        let commit: JjLogCommit = serde_json::from_str(line)
-            .with_context(|| format!("Failed to parse jj log JSON for bookmark {}", head_ref))?;
-
-        if let Some(&existing_pr) = config.prs.get(&commit.change_id) {
-            if existing_pr == pr_num {
-                println!(
-                    "Skipped PR #{} → {} (already linked)",
-                    pr_num, commit.change_id
-                );
-                skipped += 1;
-                continue;
-            } else if !args.force {
-                println!(
-                    "Conflict: bookmark {} (change {}) already linked to PR #{}, not PR #{} (use --force to overwrite)",
-                    head_ref, commit.change_id, existing_pr, pr_num
-                );
-                conflicts += 1;
-                continue;
+        match link_pr_to_bookmark(ctx, config, pr_store, pr_num, head_ref.as_str(), args.force) {
+            SmartLinkResult::Linked => linked += 1,
+            SmartLinkResult::Skipped => skipped += 1,
+            SmartLinkResult::Conflict => conflicts += 1,
+            SmartLinkResult::NotFound => {}
+            SmartLinkResult::Error(e) => {
+                eprintln!(
+                    "Unable to link PR #{} to {}: {}",
+                    pr_num,
+                    head_ref,
+                    format_error_short(&e)
+                )
             }
         }
-
-        pr_store.set(&commit.change_id, pr_num)?;
-        println!("Linked PR #{} → {}", pr_num, commit.change_id);
-        linked += 1;
     }
 
     if linked == 0 && skipped == 0 && conflicts == 0 {

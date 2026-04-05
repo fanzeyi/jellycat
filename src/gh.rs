@@ -233,6 +233,46 @@ impl Gh {
         Ok(accounts)
     }
 
+    /// Lists the authenticated user's open PRs on `upstream` as
+    /// `(number, headRefName)` pairs.
+    pub fn list_my_open_prs(&self, upstream: &str) -> Result<Vec<(u32, String)>> {
+        let mut cmd = self.cmd();
+        cmd.args([
+            "pr",
+            "list",
+            "--repo",
+            upstream,
+            "--author",
+            "@me",
+            "--state",
+            "open",
+            "--json",
+            "number,headRefName",
+        ]);
+        self.log_cmd(&cmd);
+        let cmd_str = format_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+        check_output(cmd_str, &output)?;
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let arr = data
+            .as_array()
+            .ok_or_else(|| eyre!("Expected array from gh pr list"))?;
+        let mut results = Vec::with_capacity(arr.len());
+        for item in arr {
+            let num = item["number"]
+                .as_u64()
+                .ok_or_else(|| eyre!("Missing number in gh pr list response"))?
+                as u32;
+            let head = item["headRefName"]
+                .as_str()
+                .ok_or_else(|| eyre!("Missing headRefName in gh pr list response"))?
+                .to_string();
+            results.push((num, head));
+        }
+        Ok(results)
+    }
+
     pub fn pr_view_head_ref(&self, upstream: &str, pr_num: u32) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.args([

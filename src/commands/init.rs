@@ -1,10 +1,13 @@
+use crate::commands::CommandCtx;
+use crate::commands::link::{LinkArgs, run_smart};
 use crate::config::{self, keys};
 use crate::gh::Gh;
 use crate::jj::{self, DefaultRunner, Jj};
+use crate::pr_store;
 use crate::repo;
 use clap::Args;
 use console::style;
-use dialoguer::{Input, Select, theme::ColorfulTheme};
+use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
 use eyre::{Context, Result, eyre};
 use std::sync::Arc;
 
@@ -258,6 +261,28 @@ pub fn run(args: &InitArgs) -> Result<()> {
         style(&bookmark_prefix).cyan()
     );
     println!("");
+
+    // Offer to auto-link any open PRs to matching local bookmarks.
+    let theme = ColorfulTheme::default();
+    if Confirm::with_theme(&theme)
+        .with_prompt("Link existing open PRs?")
+        .default(true)
+        .interact()
+        .context("Confirmation cancelled")?
+    {
+        let mut config = config::load(&repo_root).context("Error reloading config")?;
+        let ctx = CommandCtx::new()?;
+        let pr_store = pr_store::create(&config.pr_store_type, Arc::clone(&ctx.jj));
+        config.prs = pr_store.list()?;
+        let gh = ctx.gh(&config)?;
+        let args = LinkArgs {
+            revset: "@".to_string(),
+            pr_number: None,
+            force: false,
+            smart: true,
+        };
+        run_smart(&args, &config, pr_store.as_ref(), &ctx, &gh, &upstream_repo)?;
+    }
 
     Ok(())
 }

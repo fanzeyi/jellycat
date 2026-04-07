@@ -28,7 +28,7 @@ pub fn run(_args: &TidyArgs, config: &Config, pr_store: &dyn PrStore) -> Result<
     let revset = config
         .prs
         .keys()
-        .map(|id| id.as_str())
+        .map(|id| format!("present({})", id))
         .collect::<Vec<_>>()
         .join(" | ");
 

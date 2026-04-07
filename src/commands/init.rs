@@ -48,7 +48,9 @@ fn select_remote_and_repo(
         };
         println!(
             "{} {}",
-            style("Auto-selected remote:").green().bold(),
+            style(format!("Auto-selected {}:", prompt.to_lowercase()))
+                .green()
+                .bold(),
             display
         );
         0
@@ -74,9 +76,8 @@ fn select_remote_and_repo(
     let remote = &remotes[selected];
 
     let owner_repo: String = {
-        let prompt = format!("GitHub repo for '{}' (owner/repo)", remote.name);
         let input = Input::<String>::with_theme(&theme)
-            .with_prompt(prompt)
+            .with_prompt("GitHub repo (owner/repo)")
             .validate_with(|input: &String| validate_owner_repo(input));
         let input = match remote.repo {
             Some(ref default_repo) => input.with_initial_text(default_repo.clone()),
@@ -188,11 +189,17 @@ pub fn run(args: &InitArgs) -> Result<()> {
         ));
     }
 
-    let (upstream_remote, upstream_repo) =
-        select_remote_and_repo(&remotes, "Select the upstream remote", "upstream")?;
+    let (upstream_remote, upstream_repo) = select_remote_and_repo(
+        &remotes,
+        "Upstream remote (PRs target this repo)",
+        "upstream",
+    )?;
 
-    let (origin_remote, origin_repo) =
-        select_remote_and_repo(&remotes, "Select the origin remote", "origin")?;
+    let (origin_remote, origin_repo) = select_remote_and_repo(
+        &remotes,
+        "Origin remote (your fork, where branches are pushed)",
+        "origin",
+    )?;
 
     // GitHub account selection
     let selected_user = select_github_account()?;

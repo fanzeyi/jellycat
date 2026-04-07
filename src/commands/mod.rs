@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use clap_complete::Shell;
 
+pub mod config;
 pub mod context;
 pub mod get;
 pub mod init;
@@ -26,6 +27,8 @@ pub enum Commands {
     Unlink(unlink::UnlinkArgs),
     /// Clean up merged bookmarks and their remote tracking branches
     Tidy(tidy::TidyArgs),
+    /// Print jellycat configuration for the current repository
+    Config,
     /// Fetch a pull request branch from GitHub
     Get(get::GetArgs),
     /// Print AI assistant skills reference for teaching AI tools to use jc

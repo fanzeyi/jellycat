@@ -42,6 +42,9 @@ fn main() -> Result<()> {
         Commands::Init(args) => {
             return jellycat::commands::init::run(args);
         }
+        Commands::Config => {
+            return jellycat::commands::config::run();
+        }
         Commands::Skills => {
             print!("{}", include_str!("../SKILLS.md"));
             return Ok(());
@@ -99,6 +102,7 @@ fn main() -> Result<()> {
         Commands::Init(_)
         | Commands::Link(_)
         | Commands::Unlink(_)
+        | Commands::Config
         | Commands::Skills
         | Commands::Completions { .. } => unreachable!(),
     }

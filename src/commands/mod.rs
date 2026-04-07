@@ -6,9 +6,9 @@ pub mod context;
 pub mod get;
 pub mod init;
 pub mod link;
+pub mod pull;
 pub mod status;
 pub mod submit;
-pub mod pull;
 pub mod tidy;
 pub mod unlink;
 

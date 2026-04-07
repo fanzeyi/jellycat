@@ -44,22 +44,27 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
     // Query jj for commit info on all tracked change IDs.
     let revset = change_ids
         .iter()
-        .map(|id| id.as_str())
+        .map(|id| format!("present(change_id({}))", id))
         .collect::<Vec<_>>()
         .join(" | ");
 
-    let commits: HashMap<String, JjLogCommit> = match jj.log(&revset, "json(self) ++ \"\\n\"") {
-        Ok(output) => output
-            .lines()
-            .filter(|l| !l.is_empty())
-            .filter_map(|l| {
-                serde_json::from_str::<JjLogCommit>(l)
-                    .ok()
-                    .map(|c| (c.change_id.clone(), c))
-            })
-            .collect(),
-        Err(_) => HashMap::new(),
-    };
+    // change_id → (commit, divergent)
+    let commits: HashMap<String, (JjLogCommit, bool)> =
+        match jj.log(&revset, "json(self) ++ \"\\n\"") {
+            Ok(output) => {
+                let mut map: HashMap<String, (JjLogCommit, bool)> = HashMap::new();
+                for line in output.lines().filter(|l| !l.is_empty()) {
+                    if let Ok(c) = serde_json::from_str::<JjLogCommit>(line) {
+                        let id = c.change_id.clone();
+                        map.entry(id)
+                            .and_modify(|(_, div)| *div = true)
+                            .or_insert((c, false));
+                    }
+                }
+                map
+            }
+            Err(_) => HashMap::new(),
+        };
 
     // Sort entries by PR number for stable output.
     let mut entries: Vec<(&String, &u32)> = config.prs.iter().collect();
@@ -91,7 +96,7 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
 
         let change_short = &change_id[..12.min(change_id.len())];
 
-        if let Some(commit) = commits.get(change_id.as_str()) {
+        if let Some((commit, divergent)) = commits.get(change_id.as_str()) {
             let title = commit
                 .description
                 .lines()
@@ -99,9 +104,14 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
                 .unwrap_or("(no description)");
             let commit_short = &commit.commit_id[..8.min(commit.commit_id.len())];
             let timestamp = format_timestamp(&commit.author.timestamp);
+            let divergent_str = if *divergent {
+                format!(" {}", style("divergent").red())
+            } else {
+                String::new()
+            };
 
             eprintln!(
-                "{}  {} {} {} {} {}{}{}",
+                "{}  {} {} {} {} {}{}{}{}",
                 style("○").bold(),
                 style(change_short).magenta(),
                 style(&timestamp).cyan(),
@@ -110,6 +120,7 @@ pub fn run(_args: &StatusArgs, config: &Config) -> Result<()> {
                 state_styled,
                 checks_str,
                 comments_str,
+                divergent_str,
             );
             eprintln!("│  {}", title);
         } else {

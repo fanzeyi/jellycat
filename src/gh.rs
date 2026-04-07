@@ -294,6 +294,26 @@ impl Gh {
             .map(|s| s.to_string())
     }
 
+    pub fn pr_view_title_and_body(&self, upstream: &str, pr_num: u32) -> Result<(String, String)> {
+        let mut cmd = self.cmd();
+        cmd.args([
+            "pr",
+            "view",
+            &pr_num.to_string(),
+            "--repo",
+            upstream,
+            "--json",
+            "title,body",
+        ]);
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+        let data: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let title = data["title"].as_str().unwrap_or("").to_string();
+        let body = data["body"].as_str().unwrap_or("").to_string();
+        Ok((title, body))
+    }
+
     pub fn pr_view_body(&self, upstream: &str, pr_num: u32) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.args([

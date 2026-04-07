@@ -8,6 +8,7 @@ pub mod init;
 pub mod link;
 pub mod status;
 pub mod submit;
+pub mod sync;
 pub mod tidy;
 pub mod unlink;
 
@@ -25,6 +26,8 @@ pub enum Commands {
     Link(link::LinkArgs),
     /// Remove the pull request association from a commit
     Unlink(unlink::UnlinkArgs),
+    /// Sync commit descriptions from their associated PR titles and bodies
+    Sync(sync::SyncArgs),
     /// Clean up merged bookmarks and their remote tracking branches
     Tidy(tidy::TidyArgs),
     /// Print jellycat configuration for the current repository

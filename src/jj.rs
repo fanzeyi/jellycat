@@ -350,7 +350,7 @@ impl Jj {
         cmd.arg("bookmark")
             .arg("list")
             .arg("--template")
-            .arg(r#"name ++ "\t" ++ self.normal_target().commit_id().short(12) ++ "\n""#);
+            .arg(r#"name ++ "\t" ++ self.normal_target().change_id() ++ "\n""#);
         if let Some(filter) = filter {
             cmd.arg(filter);
         }

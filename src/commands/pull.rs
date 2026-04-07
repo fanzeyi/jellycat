@@ -7,8 +7,8 @@ use eyre::{Context, Result};
 use serde::Deserialize;
 
 #[derive(Args, Debug)]
-pub struct SyncArgs {
-    /// Revset of commits to sync from their PRs
+pub struct PullArgs {
+    /// Revset of commits to pull PR descriptions into
     #[arg(short = 'r', long = "revset")]
     pub revset: Option<String>,
 }
@@ -19,13 +19,13 @@ struct JjLogCommit {
     description: String,
 }
 
-pub fn run(args: &SyncArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
+pub fn run(args: &PullArgs, config: &Config, pr_store: &dyn PrStore) -> Result<()> {
     let ctx = CommandCtx::new()?;
     run_with_ctx(args, config, pr_store, &ctx)
 }
 
 pub fn run_with_ctx(
-    args: &SyncArgs,
+    args: &PullArgs,
     config: &Config,
     pr_store: &dyn PrStore,
     ctx: &CommandCtx,
@@ -55,7 +55,7 @@ pub fn run_with_ctx(
         return Ok(());
     }
 
-    let mut synced = 0;
+    let mut pulled = 0;
     let mut skipped = 0;
 
     for commit in &commits {
@@ -108,21 +108,17 @@ pub fn run_with_ctx(
             pr_num,
             style(&title).dim(),
         );
-        synced += 1;
+        pulled += 1;
     }
 
-    if synced > 0 || skipped > 0 {
+    if pulled > 0 || skipped > 0 {
         eprintln!();
     }
 
-    match synced {
-        0 => eprintln!("Nothing to sync."),
-        1 => eprintln!("Synced 1 commit."),
-        n => eprintln!("Synced {} commits.", n),
-    }
-
-    if skipped > 0 && skipped == commits.len() {
-        // All skipped — not an error, but informative
+    match pulled {
+        0 => eprintln!("Nothing to pull."),
+        1 => eprintln!("Pulled 1 commit description."),
+        n => eprintln!("Pulled {} commit descriptions.", n),
     }
 
     Ok(())

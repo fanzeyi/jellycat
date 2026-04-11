@@ -50,6 +50,8 @@ impl CommandRunner for DefaultRunner {
     }
 }
 
+pub const MIN_JJ_VERSION: (u32, u32, u32) = (0, 37, 0);
+
 pub struct Jj {
     repo_root: PathBuf,
     runner: Arc<dyn CommandRunner + Send + Sync>,
@@ -378,6 +380,16 @@ impl Jj {
         &self.repo_root
     }
 
+    /// Returns `(major, minor, patch)` parsed from `jj --version` output.
+    /// Example output: "jj 0.27.0"
+    pub fn version(&self) -> Result<(u32, u32, u32)> {
+        let mut cmd = Command::new("jj");
+        cmd.arg("--version");
+        let output = self.runner.run_output(&mut cmd)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_jj_version(stdout.trim())
+    }
+
     #[instrument]
     pub fn git_push_bookmarks(&self, remote: &str, bookmarks: &[&str]) -> Result<()> {
         if bookmarks.is_empty() {
@@ -391,6 +403,27 @@ impl Jj {
         self.log_cmd(&cmd);
         self.runner.check_status(&mut cmd)
     }
+}
+
+fn parse_jj_version(s: &str) -> Result<(u32, u32, u32)> {
+    let version_str = s
+        .strip_prefix("jj ")
+        .ok_or_else(|| eyre!("unexpected jj version format: {s}"))?;
+    let core = version_str.split('-').next().unwrap_or(version_str);
+    let parts: Vec<&str> = core.split('.').collect();
+    if parts.len() != 3 {
+        return Err(eyre!("unexpected jj version format: {s}"));
+    }
+    let major = parts[0]
+        .parse::<u32>()
+        .map_err(|_| eyre!("unexpected jj version format: {s}"))?;
+    let minor = parts[1]
+        .parse::<u32>()
+        .map_err(|_| eyre!("unexpected jj version format: {s}"))?;
+    let patch = parts[2]
+        .parse::<u32>()
+        .map_err(|_| eyre!("unexpected jj version format: {s}"))?;
+    Ok((major, minor, patch))
 }
 
 /// Extracts `owner/repo` from a GitHub remote URL.
@@ -421,6 +454,30 @@ pub fn parse_github_owner_repo(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_jj_version_stable() {
+        assert_eq!(parse_jj_version("jj 0.27.0").unwrap(), (0, 27, 0));
+        assert_eq!(parse_jj_version("jj 1.0.0").unwrap(), (1, 0, 0));
+        assert_eq!(parse_jj_version("jj 0.37.0").unwrap(), (0, 37, 0));
+    }
+
+    #[test]
+    fn test_parse_jj_version_prerelease() {
+        assert_eq!(parse_jj_version("jj 0.14.0-dev").unwrap(), (0, 14, 0));
+        assert_eq!(
+            parse_jj_version("jj 0.27.0-alpha.1").unwrap(),
+            (0, 27, 0)
+        );
+    }
+
+    #[test]
+    fn test_parse_jj_version_malformed() {
+        assert!(parse_jj_version("0.27.0").is_err());
+        assert!(parse_jj_version("jj 0.27").is_err());
+        assert!(parse_jj_version("jujutsu 0.27.0").is_err());
+        assert!(parse_jj_version("").is_err());
+    }
 
     #[test]
     fn test_parse_github_https() {

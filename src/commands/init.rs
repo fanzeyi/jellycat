@@ -151,11 +151,31 @@ fn select_github_account() -> Result<Option<String>> {
     Ok(Some(accounts[selected].login.clone()))
 }
 
+fn check_jj_version(jj: &Jj) -> Result<()> {
+    match jj.version() {
+        Ok((maj, min, patch)) if (maj, min, patch) < jj::MIN_JJ_VERSION => {
+            let (rmaj, rmin, rpatch) = jj::MIN_JJ_VERSION;
+            eprintln!(
+                "{} jj {maj}.{min}.{patch} is below the minimum supported version {rmaj}.{rmin}.{rpatch}. \
+                 Some features may not work correctly.",
+                style("Warning:").yellow().bold()
+            );
+        }
+        Err(e) => {
+            eprintln!("Warning: could not determine jj version: {e}");
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub fn run(args: &InitArgs) -> Result<()> {
     let repo_root = repo::find_root()
         .ok_or_else(|| eyre!("Not a jujutsu repository (or any of the parent directories): .jj"))?;
 
     let jj = Jj::new(repo_root.clone());
+
+    check_jj_version(&jj)?;
 
     let config = config::load(&repo_root).context("Error loading config")?;
 

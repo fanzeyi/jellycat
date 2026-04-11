@@ -98,6 +98,7 @@ fn main() -> Result<()> {
         Commands::Submit(args) => jellycat::commands::submit::run(args, &config, pr_store.as_ref()),
         Commands::Status(args) => jellycat::commands::status::run(args, &config),
         Commands::Pull(args) => jellycat::commands::pull::run(args, &config, pr_store.as_ref()),
+        Commands::Publish(args) => jellycat::commands::publish::run(args, &config, pr_store.as_ref()),
         Commands::Tidy(args) => jellycat::commands::tidy::run(args, &config, pr_store.as_ref()),
         Commands::Get(args) => jellycat::commands::get::run(args, &config, pr_store.as_ref()),
         Commands::Init(_)

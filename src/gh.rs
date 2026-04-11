@@ -350,6 +350,111 @@ impl Gh {
         check_output(cmd_str, &output)
     }
 
+    /// Fetches node IDs and draft status for multiple PRs in a single GraphQL call.
+    /// Returns `HashMap<pr_num, (node_id, is_draft)>`.
+    pub fn pr_node_ids_and_draft_status(
+        &self,
+        upstream: &str,
+        pr_nums: &[u32],
+    ) -> Result<HashMap<u32, (String, bool)>> {
+        if pr_nums.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let (owner, name) = upstream.split_once('/').ok_or_else(|| {
+            eyre!(
+                "Invalid upstream format '{}', expected 'owner/repo'",
+                upstream
+            )
+        })?;
+
+        const FRAGMENT: &str = r#"
+  pr_{n}: pullRequest(number: {n}) { id isDraft }"#;
+
+        let aliases: String = pr_nums
+            .iter()
+            .map(|n| FRAGMENT.replace("{n}", &n.to_string()))
+            .collect();
+
+        let query = format!(
+            r#"query {{
+  repository(owner: "{owner}", name: "{name}") {{{aliases}
+  }}
+}}"#
+        );
+
+        let mut cmd = self.cmd();
+        cmd.args(["api", "graphql", "-f", &format!("query={}", query)]);
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+
+        if !output.status.success() {
+            return Err(eyre!("gh api graphql failed: {}", Self::api_error(&output)));
+        }
+
+        #[derive(Deserialize)]
+        struct Resp {
+            data: Data,
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            repository: Repo,
+        }
+        #[derive(Deserialize)]
+        struct Repo {
+            #[serde(flatten)]
+            extra: HashMap<String, PrEntry>,
+        }
+        #[derive(Deserialize)]
+        struct PrEntry {
+            id: String,
+            #[serde(rename = "isDraft")]
+            is_draft: bool,
+        }
+
+        let response: Resp = serde_json::from_slice(&output.stdout)?;
+        let mut result = HashMap::new();
+        for &pr_num in pr_nums {
+            let alias = format!("pr_{}", pr_num);
+            if let Some(entry) = response.data.repository.extra.get(&alias) {
+                result.insert(pr_num, (entry.id.clone(), entry.is_draft));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Marks all PRs (by node ID) ready for review (or converts back to draft) in one mutation.
+    pub fn pr_ready_batch(&self, node_ids: &[String], undo: bool) -> Result<()> {
+        if node_ids.is_empty() {
+            return Ok(());
+        }
+        let mutation_name = if undo {
+            "convertPullRequestToDraft"
+        } else {
+            "markPullRequestReadyForReview"
+        };
+        let aliases: String = node_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                format!(
+                    "\n  m_{i}: {mutation_name}(input: {{pullRequestId: \"{id}\"}}) {{ pullRequest {{ id }} }}"
+                )
+            })
+            .collect();
+        let query = format!("mutation {{{aliases}\n}}");
+        let mut cmd = self.cmd();
+        cmd.args(["api", "graphql", "-f", &format!("query={}", query)]);
+        self.log_cmd(&cmd);
+        let output = self.runner.run_output(&mut cmd)?;
+        tracing::debug!("gh exited with status={}", output.status);
+        if !output.status.success() {
+            return Err(eyre!("gh api graphql failed: {}", Self::api_error(&output)));
+        }
+        Ok(())
+    }
+
     pub fn default_branch(&self, upstream: &str) -> Result<String> {
         let mut cmd = self.cmd();
         cmd.args([

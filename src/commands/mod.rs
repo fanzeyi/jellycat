@@ -7,6 +7,7 @@ pub mod get;
 pub mod init;
 pub mod link;
 pub mod pull;
+pub mod publish;
 pub mod status;
 pub mod submit;
 pub mod tidy;
@@ -28,6 +29,8 @@ pub enum Commands {
     Unlink(unlink::UnlinkArgs),
     /// Pull PR titles and bodies into local commit descriptions
     Pull(pull::PullArgs),
+    /// Publish draft pull requests as ready for review
+    Publish(publish::PublishArgs),
     /// Clean up merged bookmarks and their remote tracking branches
     Tidy(tidy::TidyArgs),
     /// Print jellycat configuration for the current repository

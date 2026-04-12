@@ -144,7 +144,7 @@ fn link_pr_to_bookmark(
         }
     }
 
-    match pr_store.set(&commit.commit_id, pr_num) {
+    match pr_store.set(&commit.change_id, pr_num) {
         Ok(()) => {
             println!("Linked PR #{} → {}", pr_num, commit.change_id);
             SmartLinkResult::Linked

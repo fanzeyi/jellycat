@@ -64,12 +64,14 @@ fn test_link_smart_links_matching_bookmark() {
         .withf(|cmd| {
             let args: Vec<_> = cmd.get_args().collect();
             args.contains(&std::ffi::OsStr::new("log"))
-                && args.contains(&std::ffi::OsStr::new("feat/foo"))
+                && args
+                    .iter()
+                    .any(|a| a.to_string_lossy().contains("remote_bookmarks(feat/foo)"))
         })
         .returning(|_| {
             Ok(Output {
                 status: ExitStatus::from_raw(0),
-                stdout: br#"{"change_id":"change_foo_id","description":"feat: foo"}"#.to_vec(),
+                stdout: br#"{"commit_id":"commit_foo_id","change_id":"change_foo_id","description":"feat: foo"}"#.to_vec(),
                 stderr: Vec::new(),
             })
         });

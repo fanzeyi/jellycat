@@ -41,10 +41,12 @@ pub fn run_with_ctx(
         jj.find_upstream_remote(upstream_repo)?
     };
 
-    let local_branch = format!("pr-{}", args.pr_number);
+    let (gh, _auth) = ctx.gh_with_auth(config)?;
+    let head_ref = gh.pr_view_head_ref(upstream_repo, args.pr_number)?;
+
     let refspec = format!(
         "refs/pull/{}/head:refs/heads/{}",
-        args.pr_number, local_branch
+        args.pr_number, head_ref
     );
 
     eprintln!(
@@ -72,11 +74,11 @@ pub fn run_with_ctx(
         "{} Fetched PR #{} as bookmark '{}'",
         style("✓").green().bold(),
         args.pr_number,
-        local_branch,
+        head_ref,
     );
 
     // Track the PR so it appears in `jc status`.
-    match repo::get_single_commit(jj.repo_root(), &local_branch) {
+    match repo::get_single_commit(jj.repo_root(), &head_ref) {
         Ok(commit) => {
             pr_store.set(&commit.change_id, args.pr_number)?;
         }
@@ -86,20 +88,20 @@ pub fn run_with_ctx(
     }
 
     if args.rebase {
-        jj.rebase(&local_branch, "@")?;
+        jj.rebase(&head_ref, "@")?;
         eprintln!(
             "{} Rebased '{}' onto current commit",
             style("✓").green().bold(),
-            local_branch,
+            head_ref,
         );
     }
 
     if args.checkout {
-        jj.new_commit(&local_branch)?;
+        jj.new_commit(&head_ref)?;
         eprintln!(
             "{} Checked out bookmark '{}'",
             style("✓").green().bold(),
-            local_branch,
+            head_ref,
         );
     }
 
